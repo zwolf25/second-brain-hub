@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Second Brain Hub</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <main class="app">
+      <!-- Onboarding: shown until a valid vault folder is configured -->
+      <section id="onboarding" class="onboarding hidden">
+        <h1>Second Brain Hub</h1>
+        <p>Point this app at your local copy of the shared SC Second Brain wikis folder.</p>
+        <p id="autodetect-msg" class="muted"></p>
+        <div class="row">
+          <button id="use-autodetect" class="hidden">Use detected folder</button>
+          <button id="browse-folder">Browse for folder…</button>
+        </div>
+        <p id="onboarding-error" class="error"></p>
+      </section>
+
+      <!-- Main search view -->
+      <section id="search-view" class="search-view hidden">
+        <header class="topbar">
+          <div class="tabs">
+            <button id="tab-search" class="tab active">Search</button>
+            <button id="tab-chat" class="tab">Chat</button>
+          </div>
+          <span id="status" class="status"></span>
+          <button id="reindex-btn" title="Re-index now">⟳</button>
+          <button id="export-logs-btn" title="Export logs">Logs</button>
+          <button id="change-vault-btn" title="Change vault folder">⚙</button>
+        </header>
+
+        <div id="search-panel" class="panel">
+          <div class="search-row">
+            <input id="search-input" type="text" placeholder="Search the wiki…" autofocus />
+            <p class="hint muted">Double-click a result to open the file.</p>
+          </div>
+          <ul id="results" class="results"></ul>
+          <p id="empty-state" class="muted"></p>
+        </div>
+
+        <div id="chat-panel" class="panel hidden">
+          <!-- Shown until the embedding model is downloaded+loaded -->
+          <div id="chat-enable" class="chat-enable">
+            <p>Chat finds related docs locally — no cloud calls, no tokens.</p>
+            <button id="enable-chat-btn">Enable AI Chat</button>
+            <div id="chat-progress" class="chat-progress hidden">
+              <div class="progress-bar"><div id="chat-progress-fill" class="progress-fill"></div></div>
+              <span id="chat-progress-label" class="muted"></span>
+            </div>
+            <p id="chat-enable-error" class="error"></p>
+          </div>
+
+          <!-- Shown once chat is enabled -->
+          <div id="chat-ask" class="chat-ask hidden">
+            <div class="search-row">
+              <input id="chat-input" type="text" placeholder="Ask a question about the wiki…" />
+              <p class="hint muted">Double-click a result to open the file.</p>
+            </div>
+            <ul id="related-results" class="results"></ul>
+            <div id="write-answer-row" class="row hidden">
+              <button id="write-answer-btn">Write me an answer</button>
+            </div>
+            <div id="answer-box" class="answer-box hidden">
+              <p id="answer-text"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
