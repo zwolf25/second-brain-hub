@@ -1,4 +1,5 @@
 mod config;
+mod counts;
 mod frontmatter;
 mod index;
 mod llm;
@@ -33,9 +34,18 @@ struct AppState {
     tantivy: Mutex<Option<(TantivyIndex, Fields)>>,
     config: Mutex<AppConfig>,
     watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
+    raw_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
+    inbox_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     status: Mutex<IndexStatus>,
-    embedding_model: Mutex<Option<llm::EmbeddingModel>>,
-    chunk_embeddings: Mutex<Vec<llm::ChunkEmbedding>>,
+    raw_count: Mutex<Option<usize>>,
+    inbox_count: Mutex<Option<usize>>,
+    // `Arc` so callers can clone the model/chunk-list out and drop the lock
+    // immediately, instead of holding it for the duration of the (slow)
+    // embedding computation — see §11 in ARCHITECTURE.md for the bug that
+    // caused (a concurrent `chat_availability` call blocking on this same
+    // lock while `enable_chat` was mid-computation, reading as "stuck loading").
+    embedding_model: Mutex<Option<Arc<llm::EmbeddingModel>>>,
+    chunk_embeddings: Mutex<Arc<Vec<llm::ChunkEmbedding>>>,
     _log_guard: Mutex<Option<WorkerGuard>>,
 }
 
@@ -77,12 +87,14 @@ fn reindex(app: &AppHandle) {
 
     // Only refresh chunk embeddings if chat has already been enabled this
     // session — most collaborators who never open the Chat tab pay nothing.
-    let embedding_guard = state.embedding_model.lock().unwrap();
-    if let Some(embed_model) = embedding_guard.as_ref() {
-        match llm::build_chunk_embeddings(&vault_path, embed_model) {
+    // Clone the Arc and drop the lock immediately rather than holding it
+    // across the (slow) embedding computation below.
+    let embed_model = state.embedding_model.lock().unwrap().clone();
+    if let Some(embed_model) = embed_model {
+        match llm::build_chunk_embeddings(&vault_path, &embed_model) {
             Ok(chunks) => {
                 tracing::info!("refreshed {} chat chunk embeddings", chunks.len());
-                *state.chunk_embeddings.lock().unwrap() = chunks;
+                *state.chunk_embeddings.lock().unwrap() = Arc::new(chunks);
             }
             Err(e) => tracing::error!("failed to refresh chunk embeddings: {e}"),
         }
@@ -95,6 +107,45 @@ fn start_watching(app: &AppHandle, vault_path: &std::path::Path) {
     match watcher::start(vault_path, move || reindex(&app_for_watcher)) {
         Ok(debouncer) => *state.watcher.lock().unwrap() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start file watcher: {e}"),
+    }
+}
+
+/// Recomputes the raw/inbox counts from config and emits the result, shared by
+/// startup, the settings-path commands, and each folder's file watcher —
+/// same shape as `reindex`/`start_watching` above.
+fn recount_raw(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let raw_path = state.config.lock().unwrap().raw_path.clone();
+    let count = raw_path.map(|p| counts::count_unprocessed_raw(&p));
+    tracing::info!("raw count: {count:?}");
+    *state.raw_count.lock().unwrap() = count;
+    let _ = app.emit("raw-count-status", count);
+}
+
+fn recount_inbox(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let inbox_path = state.config.lock().unwrap().inbox_path.clone();
+    let count = inbox_path.map(|p| counts::count_inbox_items(&p));
+    tracing::info!("inbox count: {count:?}");
+    *state.inbox_count.lock().unwrap() = count;
+    let _ = app.emit("inbox-count-status", count);
+}
+
+fn start_watching_raw(app: &AppHandle, raw_path: &std::path::Path) {
+    let state = app.state::<Arc<AppState>>();
+    let app_for_watcher = app.clone();
+    match watcher::start(raw_path, move || recount_raw(&app_for_watcher)) {
+        Ok(debouncer) => *state.raw_watcher.lock().unwrap() = Some(debouncer),
+        Err(e) => tracing::warn!("failed to start raw-folder watcher: {e}"),
+    }
+}
+
+fn start_watching_inbox(app: &AppHandle, inbox_path: &std::path::Path) {
+    let state = app.state::<Arc<AppState>>();
+    let app_for_watcher = app.clone();
+    match watcher::start(inbox_path, move || recount_inbox(&app_for_watcher)) {
+        Ok(debouncer) => *state.inbox_watcher.lock().unwrap() = Some(debouncer),
+        Err(e) => tracing::warn!("failed to start inbox-folder watcher: {e}"),
     }
 }
 
@@ -133,6 +184,60 @@ fn reindex_now(app: AppHandle) {
 }
 
 #[tauri::command]
+fn autodetect_raw() -> Option<String> {
+    config::autodetect_raw().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn autodetect_inbox() -> Option<String> {
+    config::autodetect_inbox().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn set_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.raw_path = Some(path.clone());
+        config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
+    }
+    *state.raw_watcher.lock().unwrap() = None;
+    start_watching_raw(&app, &path);
+    recount_raw(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_inbox_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.inbox_path = Some(path.clone());
+        config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
+    }
+    *state.inbox_watcher.lock().unwrap() = None;
+    start_watching_inbox(&app, &path);
+    recount_inbox(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
+    *state.raw_count.lock().unwrap()
+}
+
+#[tauri::command]
+fn get_inbox_count(state: State<Arc<AppState>>) -> Option<usize> {
+    *state.inbox_count.lock().unwrap()
+}
+
+#[tauri::command]
 fn search_vault(state: State<Arc<AppState>>, query: String) -> Result<Vec<SearchResult>, String> {
     let guard = state.tantivy.lock().unwrap();
     let Some((idx, fields)) = guard.as_ref() else {
@@ -158,7 +263,9 @@ struct ChatAvailability {
 
 #[tauri::command]
 fn chat_availability(state: State<Arc<AppState>>) -> ChatAvailability {
-    ChatAvailability { embedding_ready: state.embedding_model.lock().unwrap().is_some() }
+    let ready = state.embedding_model.lock().unwrap().is_some();
+    tracing::info!("chat_availability called, embedding_ready={ready}");
+    ChatAvailability { embedding_ready: ready }
 }
 
 #[derive(Clone, Serialize)]
@@ -182,12 +289,15 @@ fn progress_emitter(app: &AppHandle) -> impl Fn(&str, u64, u64) + '_ {
 /// Chat tab opens.
 #[tauri::command]
 fn enable_chat(app: AppHandle, state: State<Arc<AppState>>) -> Result<usize, String> {
+    tracing::info!("enable_chat called");
     if state.embedding_model.lock().unwrap().is_none() {
+        tracing::info!("enable_chat: downloading/loading embedding model");
         let paths = llm::ensure_embedding_files(&progress_emitter(&app), &state.models_dir)
             .map_err(|e| e.to_string())?;
         let _ = app.emit("chat-status", "Loading embedding model…");
         let model = llm::EmbeddingModel::load(&paths).map_err(|e| e.to_string())?;
-        *state.embedding_model.lock().unwrap() = Some(model);
+        *state.embedding_model.lock().unwrap() = Some(Arc::new(model));
+        tracing::info!("enable_chat: embedding model loaded");
     }
 
     let _ = app.emit("chat-status", "Building search index for chat (one-time, may take a moment)…");
@@ -200,11 +310,14 @@ fn enable_chat(app: AppHandle, state: State<Arc<AppState>>) -> Result<usize, Str
         .clone()
         .ok_or("No vault configured yet.")?;
 
-    let guard = state.embedding_model.lock().unwrap();
-    let model = guard.as_ref().unwrap();
-    let chunks = llm::build_chunk_embeddings(&vault_path, model).map_err(|e| e.to_string())?;
+    // Clone the Arc and drop the lock before the expensive part — holding it
+    // here would block any concurrent `chat_availability`/`related_docs` call
+    // (e.g. a second click while this is still running) until this finishes.
+    let model = state.embedding_model.lock().unwrap().clone().unwrap();
+    let chunks = llm::build_chunk_embeddings(&vault_path, &model).map_err(|e| e.to_string())?;
     let count = chunks.len();
-    *state.chunk_embeddings.lock().unwrap() = chunks;
+    *state.chunk_embeddings.lock().unwrap() = Arc::new(chunks);
+    tracing::info!("enable_chat: done, {count} chunk embeddings built");
     Ok(count)
 }
 
@@ -218,10 +331,9 @@ struct RelatedResult {
 
 #[tauri::command]
 fn related_docs(state: State<Arc<AppState>>, query: String) -> Result<Vec<RelatedResult>, String> {
-    let guard = state.embedding_model.lock().unwrap();
-    let model = guard.as_ref().ok_or("Chat isn't enabled yet.")?;
-    let chunks = state.chunk_embeddings.lock().unwrap();
-    let top = llm::top_related(model, &chunks, &query, 8).map_err(|e| e.to_string())?;
+    let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
+    let chunks = state.chunk_embeddings.lock().unwrap().clone();
+    let top = llm::top_related(&model, &chunks, &query, 8).map_err(|e| e.to_string())?;
     Ok(top
         .into_iter()
         .map(|(score, c)| RelatedResult {
@@ -238,10 +350,9 @@ fn related_docs(state: State<Arc<AppState>>, query: String) -> Result<Vec<Relate
 #[tauri::command]
 fn write_answer(app: AppHandle, state: State<Arc<AppState>>, query: String) -> Result<String, String> {
     let top = {
-        let guard = state.embedding_model.lock().unwrap();
-        let model = guard.as_ref().ok_or("Chat isn't enabled yet.")?;
-        let chunks = state.chunk_embeddings.lock().unwrap();
-        llm::top_related(model, &chunks, &query, 3).map_err(|e| e.to_string())?
+        let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
+        let chunks = state.chunk_embeddings.lock().unwrap().clone();
+        llm::top_related(&model, &chunks, &query, 3).map_err(|e| e.to_string())?
     };
     let chat_paths = llm::ensure_chat_files(&progress_emitter(&app), &state.models_dir)
         .map_err(|e| e.to_string())?;
@@ -273,9 +384,13 @@ pub fn run() {
                 tantivy: Mutex::new(None),
                 config: Mutex::new(config.clone()),
                 watcher: Mutex::new(None),
+                raw_watcher: Mutex::new(None),
+                inbox_watcher: Mutex::new(None),
                 status: Mutex::new(IndexStatus::Idle { count: 0 }),
+                raw_count: Mutex::new(None),
+                inbox_count: Mutex::new(None),
                 embedding_model: Mutex::new(None),
-                chunk_embeddings: Mutex::new(Vec::new()),
+                chunk_embeddings: Mutex::new(Arc::new(Vec::new())),
                 _log_guard: Mutex::new(Some(log_guard)),
             });
             app.manage(state);
@@ -284,6 +399,16 @@ pub fn run() {
                 let app_handle = handle.clone();
                 start_watching(&app_handle, &vault_path);
                 reindex(&app_handle);
+            }
+            if let Some(raw_path) = config.raw_path {
+                let app_handle = handle.clone();
+                start_watching_raw(&app_handle, &raw_path);
+                recount_raw(&app_handle);
+            }
+            if let Some(inbox_path) = config.inbox_path {
+                let app_handle = handle.clone();
+                start_watching_inbox(&app_handle, &inbox_path);
+                recount_inbox(&app_handle);
             }
 
             Ok(())
@@ -300,6 +425,12 @@ pub fn run() {
             enable_chat,
             related_docs,
             write_answer,
+            autodetect_raw,
+            autodetect_inbox,
+            set_raw_path,
+            set_inbox_path,
+            get_raw_count,
+            get_inbox_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,29 +10,67 @@
 
   <body>
     <main class="app">
-      <!-- Onboarding: shown until a valid vault folder is configured -->
+      <!-- Onboarding / settings: shown until a valid vault folder is configured,
+           and reopened later by the ⚙ button to adjust any of the three paths -->
       <section id="onboarding" class="onboarding hidden">
         <h1>Second Brain Hub</h1>
-        <p>Point this app at your local copy of the shared SC Second Brain wikis folder.</p>
-        <p id="autodetect-msg" class="muted"></p>
-        <div class="row">
-          <button id="use-autodetect" class="hidden">Use detected folder</button>
-          <button id="browse-folder">Browse for folder…</button>
+
+        <div class="settings-section">
+          <h2>Wikis <span class="muted">(required)</span></h2>
+          <p>Point this app at your local copy of the shared SC Second Brain wikis folder.</p>
+          <p id="vault-status-msg" class="muted"></p>
+          <div class="row">
+            <button id="use-vault-autodetect" class="hidden">Use detected folder</button>
+            <button id="browse-vault-folder">Browse for folder…</button>
+          </div>
+          <p id="onboarding-error" class="error"></p>
         </div>
-        <p id="onboarding-error" class="error"></p>
+
+        <div class="settings-section">
+          <h2>Raw notes <span class="muted">(optional)</span></h2>
+          <p>Powers the 📄 raw-file heads-up badge (runs <code>wiki-builder</code>).</p>
+          <p id="raw-status-msg" class="muted"></p>
+          <div class="row">
+            <button id="use-raw-autodetect" class="hidden">Use detected folder</button>
+            <button id="browse-raw-folder">Browse for folder…</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h2>Inbox <span class="muted">(optional)</span></h2>
+          <p>Powers the 📥 inbox heads-up badge (runs <code>inbox-review</code>).</p>
+          <p id="inbox-status-msg" class="muted"></p>
+          <div class="row">
+            <button id="use-inbox-autodetect" class="hidden">Use detected folder</button>
+            <button id="browse-inbox-folder">Browse for folder…</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="done-settings-btn" class="hidden">Done</button>
+        </div>
       </section>
 
       <!-- Main search view -->
       <section id="search-view" class="search-view hidden">
         <header class="topbar">
-          <div class="tabs">
-            <button id="tab-search" class="tab active">Search</button>
-            <button id="tab-chat" class="tab">Chat</button>
+          <div class="mode-toggle">
+            <span class="toggle-label">Keyword Search</span>
+            <label class="switch">
+              <input type="checkbox" id="mode-ai-switch" />
+              <span class="switch-track"><span class="switch-knob"></span></span>
+            </label>
+            <span class="toggle-label tooltip" data-tooltip="Find related markdowns locally — no tokens.">AI Search</span>
           </div>
           <span id="status" class="status"></span>
+          <button id="raw-badge" class="badge hidden" title="Unprocessed raw notes — click to run /wiki-builder">📄 <span id="raw-count-num">0</span></button>
+          <button id="inbox-badge" class="badge hidden" title="Items in your inbox — click to run /inbox-review">📥 <span id="inbox-count-num">0</span></button>
+          <button id="new-session-btn" class="badge icon-btn" title="Start a new Claude Code session">
+            <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
+          </button>
           <button id="reindex-btn" title="Re-index now">⟳</button>
           <button id="export-logs-btn" title="Export logs">Logs</button>
-          <button id="change-vault-btn" title="Change vault folder">⚙</button>
+          <button id="change-vault-btn" title="Settings">⚙</button>
         </header>
 
         <div id="search-panel" class="panel">
@@ -45,15 +83,13 @@
         </div>
 
         <div id="chat-panel" class="panel hidden">
-          <!-- Shown until the embedding model is downloaded+loaded -->
-          <div id="chat-enable" class="chat-enable">
-            <p>Chat finds related docs locally — no cloud calls, no tokens.</p>
-            <button id="enable-chat-btn">Enable AI Chat</button>
-            <div id="chat-progress" class="chat-progress hidden">
-              <div class="progress-bar"><div id="chat-progress-fill" class="progress-fill"></div></div>
-              <span id="chat-progress-label" class="muted"></span>
-            </div>
+          <!-- Replaces the AI Search bar while the embedding model downloads/
+               loads. Selecting the AI Search toggle triggers this automatically. -->
+          <div id="chat-loading" class="chat-loading-spinner hidden">
+            <div class="spinner"></div>
+            <p id="chat-progress-label" class="muted"></p>
             <p id="chat-enable-error" class="error"></p>
+            <button id="chat-retry-btn" class="hidden">Try again</button>
           </div>
 
           <!-- Shown once chat is enabled -->
