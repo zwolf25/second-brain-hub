@@ -4,7 +4,7 @@ Local desktop app that indexes the shared SC PM "Second Brain" wiki vault (OneDr
 
 (Product name is "Second Brain Hub"; the underlying project folder, npm package, and Rust crate/binary are still named `second-brain-search` — internal plumbing, not user-visible, left as-is rather than doing a full rename.)
 
-Status: **v1 (search) and v2 (local chat) are both implemented and verified against the real shared vault**, including live GUI testing that surfaced and fixed several real bugs (§10). Windows packaging is still blocked on machine/CI access (§8).
+Status: **v1 (search) and v2 (local chat) are both implemented and verified against the real shared vault**, including live GUI testing that surfaced and fixed several real bugs (§10). Windows builds now ship via GitHub Actions CI (§8) — the earlier "no Windows machine" blocker is resolved.
 
 ## 1. Stack
 
@@ -112,9 +112,13 @@ Tested and ruled out as fixes: bumping the chat model from 0.5B to 1.5B-Instruct
 
 **Mac:** `cargo tauri build` → unsigned `.app`/`.dmg`. Xcode Command Line Tools are sufficient for this; full notarization/Apple Developer Program enrollment is explicitly skipped as unnecessary cost for a handful-of-teammates internal tool. First launch requires a Gatekeeper right-click → Open (or `xattr -cr` the `.app`).
 
-**Windows — real, unresolved blocker:** cannot be cross-compiled from macOS. Tauri's Windows target needs the MSVC linker, WebView2, and NSIS/WiX bundling — none of which cross-compile from macOS. Needs one of: (1) an actual Windows machine to run `cargo tauri build` locally (cheapest), (2) a GitHub Actions `windows-latest` runner if this repo goes to GitHub, (3) a Windows VM as a fallback. **Blocked on access to one of these** — currently only ships for Mac.
+**Windows — resolved via GitHub Actions.** Tauri's Windows target can't be cross-compiled from macOS (needs the MSVC linker, WebView2, NSIS/WiX bundling), so the actual build runs on a `windows-latest` GitHub Actions runner instead. Repo: `https://github.com/zwolf25/second-brain-hub` (private). Workflow: `.github/workflows/build-windows.yml`, triggers on push to `main` or manually (`workflow_dispatch`), builds both `.msi` and `.exe` (NSIS) installers and publishes them as a numbered GitHub Release (`windows-build-N`) rather than as an Actions artifact — Actions' native artifact storage (`productionresultssa8.blob.core.windows.net`) gets connection-reset on this network in both the CLI and a real browser, almost certainly a Zscaler-blocked Azure endpoint; Release assets are served from a different domain and download cleanly.
 
-**Explicitly out of scope:** auto-updater, telemetry, multi-user sync/accounts/backend, a real vector DB (brute-force cosine is enough at this corpus size), a wikilink cross-reference graph UI (brackets are just stripped for display).
+**Current update/distribution model — fully manual, deliberately.** There is no auto-updater (see below). Every push to `main` produces a new numbered Release with a fresh installer; each collaborator (Mac or Windows) re-downloads and reinstalls by hand to pick up changes. Fine for occasional low-volume updates to a handful of people; would get annoying fast with frequent releases.
+
+**Explicitly out of scope (for now):** auto-updater, telemetry, multi-user sync/accounts/backend, a real vector DB (brute-force cosine is enough at this corpus size), a wikilink cross-reference graph UI (brackets are just stripped for display).
+
+**Future consideration — auto-updater.** If manual re-download/reinstall becomes painful (frequent releases, more collaborators), Tauri has a built-in `tauri-plugin-updater` that checks a hosted `latest.json` manifest on launch and downloads+installs updates automatically. Real setup cost beyond what exists today: generate a signing keypair (updates must be signed), host `latest.json` somewhere the app can reach (could live in the same GitHub Release, updated by the CI workflow each build), and add the plugin + update-check UI. Not built now — explicitly deferred, not forgotten.
 
 ## 9. Capabilities / permissions (`src-tauri/capabilities/default.json`)
 
@@ -131,8 +135,8 @@ Live GUI testing (not just automated tests) surfaced several real issues automat
 
 ## 11. Known risks / open items
 
-1. File-watcher robustness against OneDrive sync behavior (partial writes, transient lock files) is defensive-by-design (skip-on-error, filter `~$*`) but was only exercised by real ambient vault activity during verification, not a deliberate edit-while-running stress test — worth a dedicated smoke test, especially on Windows once that build exists.
-2. Windows build is blocked on machine/CI access (§8) — not a code problem.
+1. File-watcher robustness against OneDrive sync behavior (partial writes, transient lock files) is defensive-by-design (skip-on-error, filter `~$*`) but was only exercised by real ambient vault activity during verification on Mac, not a deliberate edit-while-running stress test, and not yet exercised on Windows at all — worth a dedicated smoke test there.
+2. No auto-updater (§8) — every update is a manual re-download/reinstall. Deferred, not forgotten; Tauri's `tauri-plugin-updater` is the concrete path if this becomes painful.
 3. Chat retrieval quality on technical/identifier-dense queries is a documented, evidenced gap (§7) — recommended fix is hybrid tantivy+embedding retrieval, not yet built.
 4. Chat-side commands have no `tracing` logging (§6) — hard to debug in the field beyond what a user reports directly.
 5. Full-rewalk-on-any-change indexing (§3) assumes the vault stays small; revisit if it ever measurably slows down.
