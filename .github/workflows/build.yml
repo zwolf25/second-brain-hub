@@ -62,11 +62,18 @@ jobs:
       # ship installers that way instead (this only affects the final
       # human-facing download; upload/download-artifact between jobs above is
       # server-to-server on GitHub's infra and unaffected).
+      # Recursive globs (`**`), not `dist/<artifact>/*` — the Windows artifact
+      # was uploaded from two path patterns (msi/*.msi, nsis/*.exe), so
+      # actions/upload-artifact preserved the msi/ and nsis/ subdirectories
+      # inside it (single-pattern uploads like macOS's don't have this
+      # problem, which is why only the .dmg made it into build-1's release
+      # and the Windows installers silently matched nothing).
       - name: Publish installers to a GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }}
           files: |
-            dist/windows-installers/*
-            dist/macos-installer/*
+            dist/windows-installers/**/*.msi
+            dist/windows-installers/**/*.exe
+            dist/macos-installer/**/*.dmg
