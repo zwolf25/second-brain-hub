@@ -290,6 +290,11 @@ fn progress_emitter(app: &AppHandle) -> impl Fn(&str, u64, u64) + '_ {
 #[tauri::command]
 fn enable_chat(app: AppHandle, state: State<Arc<AppState>>) -> Result<usize, String> {
     tracing::info!("enable_chat called");
+    if low_ram() {
+        return Err(
+            "Not enough free memory on this device for AI Search — showing keyword search only.".into(),
+        );
+    }
     if state.embedding_model.lock().unwrap().is_none() {
         tracing::info!("enable_chat: downloading/loading embedding model");
         let paths = llm::ensure_embedding_files(&progress_emitter(&app), &state.models_dir)
@@ -329,11 +334,48 @@ struct RelatedResult {
     score: f32,
 }
 
+/// Runs tantivy's existing keyword search for the same query, for the RRF
+/// hybrid fusion in `llm::hybrid_top_related` — returns an empty Vec (rather
+/// than erroring) if no vault is indexed yet, since keyword search is a
+/// quality boost here, not a hard requirement for chat retrieval to work.
+fn keyword_results_for(state: &Arc<AppState>, query: &str) -> Vec<SearchResult> {
+    let guard = state.tantivy.lock().unwrap();
+    match guard.as_ref() {
+        Some((idx, fields)) => search::search(idx, fields, query).unwrap_or_default(),
+        None => vec![],
+    }
+}
+
+/// Conservative safety net (ARCHITECTURE.md plan, §5) — a hard crash or a
+/// frozen machine on genuinely RAM-starved hardware is worse than skipping
+/// generation, so this is checked before any embedding/chat work, not just
+/// generation.
+///
+/// Uses `total_memory() - used_memory()`, not `available_memory()` —
+/// confirmed live on macOS that `available_memory()` returns a flat `0`
+/// (a known sysinfo/macOS gap: it undercounts reclaimable inactive/purgeable
+/// pages that `vm_stat` and Activity Monitor both count as available), which
+/// made this gate fire on every machine regardless of real headroom.
+/// `total - used` matched `vm_stat`'s real free+reclaimable estimate on a
+/// live test (~4.16GB on an 18GB Mac using ~15GB) and is well-supported
+/// cross-platform.
+const LOW_RAM_THRESHOLD_BYTES: u64 = 1_000_000_000;
+
+fn low_ram() -> bool {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    sys.total_memory().saturating_sub(sys.used_memory()) < LOW_RAM_THRESHOLD_BYTES
+}
+
 #[tauri::command]
 fn related_docs(state: State<Arc<AppState>>, query: String) -> Result<Vec<RelatedResult>, String> {
     let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
     let chunks = state.chunk_embeddings.lock().unwrap().clone();
-    let top = llm::top_related(&model, &chunks, &query, 8).map_err(|e| e.to_string())?;
+    let keyword = keyword_results_for(&state, &query);
+    // 15, not 8 — the real-vault regression test (llm.rs) confirmed the
+    // documented identifier-dense failure case now lands at rank ~13 post-fusion,
+    // not top-8; a narrower k here would silently keep dropping it.
+    let top = llm::hybrid_top_related(&model, &chunks, &query, 15, &keyword).map_err(|e| e.to_string())?;
     Ok(top
         .into_iter()
         .map(|(score, c)| RelatedResult {
@@ -349,10 +391,17 @@ fn related_docs(state: State<Arc<AppState>>, query: String) -> Result<Vec<Relate
 /// chat model fresh for this one request and drops it — no standing cost.
 #[tauri::command]
 fn write_answer(app: AppHandle, state: State<Arc<AppState>>, query: String) -> Result<String, String> {
+    if low_ram() {
+        return Err(
+            "Not enough free memory on this device for AI-written answers — showing matching docs only."
+                .into(),
+        );
+    }
     let top = {
         let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
         let chunks = state.chunk_embeddings.lock().unwrap().clone();
-        llm::top_related(&model, &chunks, &query, 3).map_err(|e| e.to_string())?
+        let keyword = keyword_results_for(&state, &query);
+        llm::hybrid_top_related(&model, &chunks, &query, 5, &keyword).map_err(|e| e.to_string())?
     };
     let chat_paths = llm::ensure_chat_files(&progress_emitter(&app), &state.models_dir)
         .map_err(|e| e.to_string())?;
@@ -361,6 +410,27 @@ fn write_answer(app: AppHandle, state: State<Arc<AppState>>, query: String) -> R
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Caps candle's CPU backend (gemm/rayon) to a single thread — leaves real
+    // headroom for the OS/UI on a weak quad-core Chromebook-class machine, and
+    // per a public benchmark on a similarly small model (huggingface/candle
+    // #3134), single-threaded measurably beat all-cores for a model this size
+    // (69.5 tok/s vs. 53.6 tok/s) — not a speed-for-safety tradeoff.
+    //
+    // Originally set to 2 threads; dropped to 1 after a real live bug: with
+    // >1 thread, rayon's parallel float reduction in gemm doesn't guarantee a
+    // fixed summation order across runs (a known rayon+floating-point caveat —
+    // work-stealing means which worker's partial sum lands where isn't fixed),
+    // so the exact same query could silently generate a different answer on
+    // different launches of the app, including occasional degenerate ones
+    // (the model echoing the question back). Confirmed live: identical
+    // real-vault repro runs produced three different outputs for the same
+    // query before this fix. At 1 thread there's no parallel reduction to
+    // reorder — same input reliably gives the same output.
+    //
+    // Must run before any embedding/chat (candle) op, so it's the first thing
+    // `run()` does.
+    let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

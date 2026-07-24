@@ -172,8 +172,19 @@ body {
   padding: 0.75em 1em 0;
 }
 
-.search-row input {
+.search-row > input {
   width: 100%;
+  padding: 0.5em 0.8em;
+}
+
+.search-row-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.search-row-inputs input {
+  flex: 1;
   padding: 0.5em 0.8em;
 }
 
@@ -206,6 +217,18 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+.chat-thinking {
+  display: flex;
+  justify-content: center;
+  padding: 1em 0;
+}
+
+.spinner-sm {
+  width: 20px;
+  height: 20px;
+  border-width: 3px;
 }
 
 .progress-bar {

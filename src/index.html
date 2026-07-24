@@ -95,16 +95,19 @@
           <!-- Shown once chat is enabled -->
           <div id="chat-ask" class="chat-ask hidden">
             <div class="search-row">
-              <input id="chat-input" type="text" placeholder="Ask a question about the wiki…" />
+              <div class="search-row-inputs">
+                <input id="chat-input" type="text" placeholder="Ask a question about the wiki… (Enter for an AI answer)" />
+                <button id="ask-btn" class="hidden">Ask</button>
+              </div>
               <p class="hint muted">Double-click a result to open the file.</p>
             </div>
-            <ul id="related-results" class="results"></ul>
-            <div id="write-answer-row" class="row hidden">
-              <button id="write-answer-btn">Write me an answer</button>
+            <div id="chat-thinking" class="chat-thinking hidden">
+              <div class="spinner spinner-sm"></div>
             </div>
             <div id="answer-box" class="answer-box hidden">
               <p id="answer-text"></p>
             </div>
+            <ul id="related-results" class="results"></ul>
           </div>
         </div>
       </section>

@@ -174,8 +174,8 @@ const chatEnableError = document.querySelector("#chat-enable-error");
 const chatRetryBtn = document.querySelector("#chat-retry-btn");
 const chatInput = document.querySelector("#chat-input");
 const relatedResultsEl = document.querySelector("#related-results");
-const writeAnswerRow = document.querySelector("#write-answer-row");
-const writeAnswerBtn = document.querySelector("#write-answer-btn");
+const askBtn = document.querySelector("#ask-btn");
+const chatThinking = document.querySelector("#chat-thinking");
 const answerBox = document.querySelector("#answer-box");
 const answerTextEl = document.querySelector("#answer-text");
 
@@ -243,6 +243,8 @@ function minRemainingDelay(startTime, minMs) {
 
 chatRetryBtn.addEventListener("click", activateAiSearch);
 
+let lastRelatedResults = [];
+
 function renderRelated(results) {
   relatedResultsEl.innerHTML = "";
   for (const r of results) {
@@ -255,39 +257,81 @@ function renderRelated(results) {
     li.addEventListener("dblclick", () => openResultPath(r.path));
     relatedResultsEl.appendChild(li);
   }
-  writeAnswerRow.classList.toggle("hidden", results.length === 0);
 }
 
+// The model isn't asked for markdown, but small instruct models default to
+// it anyway (**bold**, `code`) — strip it since the answer renders as plain
+// text, not through a markdown renderer.
+function cleanAnswerText(text) {
+  return text.replace(/[*`]+/g, "");
+}
+
+async function fetchRelated(query) {
+  const results = await invoke("related_docs", { query });
+  lastRelatedResults = results;
+  askBtn.classList.toggle("hidden", results.length === 0);
+  return results;
+}
+
+// Extractive only — fires on every debounce tick while typing. Cheap and
+// near-instant, safe to run on every pause. Generation (`askForAnswer`) is
+// deliberately NOT chained off this: it's heavy enough to freeze the render
+// thread for its full duration (same class of issue as ARCHITECTURE.md §11
+// #6), so firing it on every mid-sentence typing pause reads as the whole
+// app locking up mid-keystroke. Generation only runs on explicit submit
+// (Enter key or the Ask button). The related-doc list itself stays hidden
+// until an answer has been shown (see `askForAnswer`) — only the Ask button's
+// visibility reacts to results while typing.
 async function runRelatedSearch() {
   const query = chatInput.value.trim();
   lastChatQuery = query;
   answerBox.classList.add("hidden");
+  relatedResultsEl.innerHTML = ""; // clear any list left over from a previous answer
   if (!query) {
-    relatedResultsEl.innerHTML = "";
-    writeAnswerRow.classList.add("hidden");
+    lastRelatedResults = [];
+    askBtn.classList.add("hidden");
     return;
   }
-  const results = await invoke("related_docs", { query });
-  renderRelated(results);
+
+  await fetchRelated(query);
 }
 
-writeAnswerBtn.addEventListener("click", async () => {
-  const query = lastChatQuery;
+async function askForAnswer() {
+  const query = chatInput.value.trim();
   if (!query) return;
-  writeAnswerBtn.disabled = true;
-  writeAnswerBtn.textContent = "Thinking…";
-  answerBox.classList.remove("hidden");
+  lastChatQuery = query;
+  clearTimeout(chatDebounceTimer);
+  answerBox.classList.add("hidden");
   answerTextEl.textContent = "";
+  relatedResultsEl.innerHTML = "";
+  chatThinking.classList.remove("hidden");
+  askBtn.disabled = true;
+
+  // Enter can be pressed before the 200ms debounce fires — make sure the
+  // related-doc list (used both for the Ask-button gate and as citations
+  // once the answer renders) is fresh for this exact query.
+  await fetchRelated(query);
+
+  // Same paint-yield fix as `enable_chat`'s loading spinner (ARCHITECTURE.md
+  // §11 #6) — the candle generation call is CPU-heavy enough to starve the
+  // render thread before the "Thinking…" indicator gets painted otherwise.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
   try {
     const answer = await invoke("write_answer", { query });
-    answerTextEl.textContent = answer;
+    if (query !== lastChatQuery) return;
+    answerTextEl.textContent = cleanAnswerText(answer);
+    answerBox.classList.remove("hidden");
   } catch (e) {
-    answerTextEl.textContent = `Error: ${e}`;
+    if (query !== lastChatQuery) return;
+    answerTextEl.textContent = String(e);
+    answerBox.classList.remove("hidden");
   } finally {
-    writeAnswerBtn.disabled = false;
-    writeAnswerBtn.textContent = "Write me an answer";
+    chatThinking.classList.add("hidden");
+    askBtn.disabled = false;
+    if (query === lastChatQuery) renderRelated(lastRelatedResults);
   }
-});
+}
 
 // --- Raw / Inbox heads-up badges (topbar, omnipresent across tabs) ---
 
@@ -359,6 +403,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     clearTimeout(chatDebounceTimer);
     chatDebounceTimer = setTimeout(runRelatedSearch, 200);
   });
+
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") askForAnswer();
+  });
+
+  askBtn.addEventListener("click", askForAnswer);
 
   doneSettingsBtn.addEventListener("click", showSearchView);
 
