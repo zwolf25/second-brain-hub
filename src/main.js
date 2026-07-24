@@ -342,11 +342,13 @@ const inboxCountNum = document.querySelector("#inbox-count-num");
 
 function renderRawCount(count) {
   rawBadge.classList.toggle("hidden", count === null || count === undefined);
+  rawBadge.classList.toggle("count-alert", Boolean(count));
   if (count != null) rawCountNum.textContent = count;
 }
 
 function renderInboxCount(count) {
   inboxBadge.classList.toggle("hidden", count === null || count === undefined);
+  inboxBadge.classList.toggle("count-alert", Boolean(count));
   if (count != null) inboxCountNum.textContent = count;
 }
 

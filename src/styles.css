@@ -264,22 +264,36 @@ body {
   white-space: nowrap;
 }
 
-.badge {
+/* Shared style for every topbar control (raw/inbox badges, new-session,
+   reindex, logs, settings) — a fixed height (not just padding) so a
+   text-only button and an icon-only button line up pixel-for-pixel. */
+.topbar-btn {
+  height: 30px;
+  padding: 0 0.7em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
   font-size: 0.85em;
-  padding: 0.3em 0.6em;
-  background: #fff3a3;
-  border-color: #e0c840;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+  box-sizing: border-box;
 }
 
-.badge:hover {
+.topbar-btn:hover {
   border-color: #396cd8;
 }
 
-.icon-btn {
-  background: #fff;
-  padding: 0.3em 0.5em;
-  display: flex;
-  align-items: center;
+/* Raw/inbox badges only turn yellow once their count is actually > 0 —
+   toggled in main.js, not tied to visibility (a count of 0 still shows the
+   badge, just without the attention-grabbing color). */
+.topbar-btn.count-alert {
+  background: #fff3a3;
+  border-color: #e0c840;
 }
 
 .claude-icon {
@@ -400,12 +414,13 @@ button:hover {
     border-color: #444;
     border-top-color: #6a9bff;
   }
-  .badge {
-    background: #4a4420;
-    border-color: #6b5f2a;
+  .topbar-btn {
+    background: #2a2a2a;
+    border-color: #444;
     color: #f0f0f0;
   }
-  .icon-btn {
-    background: #2a2a2a;
+  .topbar-btn.count-alert {
+    background: #4a4420;
+    border-color: #6b5f2a;
   }
 }
