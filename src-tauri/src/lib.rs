@@ -1,8 +1,11 @@
 mod config;
 mod counts;
+#[cfg(target_os = "macos")]
+mod default_handler;
 mod frontmatter;
 mod index;
 mod logging;
+mod render;
 mod search;
 mod watcher;
 
@@ -40,6 +43,26 @@ struct AppState {
     inbox_count: Mutex<Option<usize>>,
     shared_raw_count: Mutex<Option<usize>>,
     _log_guard: Mutex<Option<WorkerGuard>>,
+}
+
+// A file path the OS handed us at launch (Windows/Linux argv, or a macOS
+// open-file event). Deliberately a plain static, not Tauri-managed AppState —
+// macOS can deliver the open-file Apple Event before `.setup()` runs (caught
+// live: `app.state::<Arc<AppState>>()` here panicked, and since this call
+// path crosses tao's ObjC delegate callback, an unwind isn't allowed, so the
+// panic became a hard abort/crash instead of a catchable error). A static
+// needs no `.manage()` call first, so it's safe at any point in startup.
+// Consumed once via `get_launch_file_path`; later opens while already
+// running arrive as the "open-file-request" event instead.
+static PENDING_OPEN_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+/// Stores a launch-time file path for `get_launch_file_path` to pick up, and
+/// also emits it as an event in case the frontend is already listening (the
+/// already-running case on every platform, and the rare late-`Opened` case
+/// on macOS). A frontend that catches both just re-renders the same doc.
+fn handle_open_file(app: &AppHandle, path: String) {
+    *PENDING_OPEN_PATH.lock().unwrap() = Some(path.clone());
+    let _ = app.emit("open-file-request", path);
 }
 
 /// Rebuilds the tantivy index from the vault currently in config, if any is
@@ -282,9 +305,62 @@ fn get_index_status(state: State<Arc<AppState>>) -> IndexStatus {
     *state.status.lock().unwrap()
 }
 
+#[tauri::command]
+fn render_markdown(path: String) -> Result<render::RenderedDoc, String> {
+    render::render_file(std::path::Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_launch_file_path() -> Option<String> {
+    PENDING_OPEN_PATH.lock().unwrap().take()
+}
+
+// `None` means "can't tell" (only macOS has a real Launch Services query;
+// Windows blocks programmatic default-app changes entirely since Windows 8,
+// so there's no equivalent to check) — the frontend uses that to decide
+// whether to show the one-click Mac UI or the guided-Settings-link Windows UI.
+#[tauri::command]
+fn is_default_md_handler() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(default_handler::is_default())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+#[tauri::command]
+fn set_default_md_handler() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        default_handler::set_as_default()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Not supported on this platform — use the Settings link instead.".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first (plugin's own requirement) — handles the
+        // Windows/Linux "already running" case: a second launch's argv is
+        // forwarded here instead of spawning a second process. macOS routes
+        // both cold-start and already-running file-opens through
+        // RunEvent::Opened instead, so this is largely a no-op safety net there.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(path) = argv.get(1) {
+                if std::path::Path::new(path).is_file() {
+                    handle_open_file(app, path.clone());
+                }
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -317,6 +393,15 @@ pub fn run() {
                 _log_guard: Mutex::new(Some(log_guard)),
             });
             app.manage(state);
+
+            // Windows/Linux hand a double-clicked file to a freshly-launched
+            // process as argv[1] (macOS instead uses RunEvent::Opened, below —
+            // args() here is just the app binary path on that platform).
+            if let Some(path) = std::env::args().nth(1) {
+                if std::path::Path::new(&path).is_file() {
+                    handle_open_file(&handle, path);
+                }
+            }
 
             if let Some(vault_path) = config.vault_path {
                 let app_handle = handle.clone();
@@ -358,7 +443,24 @@ pub fn run() {
             get_raw_count,
             get_inbox_count,
             get_shared_raw_count,
+            render_markdown,
+            get_launch_file_path,
+            is_default_md_handler,
+            set_default_md_handler,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS open-file/open-url event — covers both a cold launch via
+            // "Open With" / default-handler double-click, and a later
+            // double-click while already running (macOS routes both through
+            // the same running-process Apple Event, no second process).
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls {
+                    if let Ok(path) = url.to_file_path() {
+                        handle_open_file(app_handle, path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        });
 }

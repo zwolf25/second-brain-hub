@@ -30,17 +30,22 @@ pub fn parse(raw: &str, filename_fallback: &str) -> ParsedDoc {
         .find_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
         .unwrap_or_else(|| filename_fallback.to_string());
 
-    let strip_brackets = |s: &str| s.replace("[[", "").replace("]]", "");
-
     ParsedDoc {
-        title: strip_brackets(&title),
-        body: strip_brackets(body),
-        topics: strip_brackets(&fm.topics.join(" ")),
+        title: strip_wikilink_brackets(&title),
+        body: strip_wikilink_brackets(body),
+        topics: strip_wikilink_brackets(&fm.topics.join(" ")),
         updated: fm.updated,
     }
 }
 
-fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
+/// Strips `[[`/`]]` so a wikilink reads as plain text. Naive string replace,
+/// not regex — also strips literal `[[` outside a wikilink (e.g. in a code
+/// block), an accepted simplification at this scope.
+pub fn strip_wikilink_brackets(s: &str) -> String {
+    s.replace("[[", "").replace("]]", "")
+}
+
+pub(crate) fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
     let raw = raw.trim_start_matches('\u{feff}'); // strip BOM if present
     let Some(rest) = raw.strip_prefix("---") else {
         return (None, raw);

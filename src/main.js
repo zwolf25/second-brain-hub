@@ -1,4 +1,4 @@
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open: openDialog } = window.__TAURI__.dialog;
 const { openPath, openUrl, revealItemInDir } = window.__TAURI__.opener;
@@ -7,12 +7,15 @@ const { relaunch } = window.__TAURI__.process;
 
 const onboarding = document.querySelector("#onboarding");
 const searchView = document.querySelector("#search-view");
+const viewerView = document.querySelector("#viewer-view");
 const onboardingError = document.querySelector("#onboarding-error");
 const doneSettingsBtn = document.querySelector("#done-settings-btn");
 const searchInput = document.querySelector("#search-input");
 const statusEl = document.querySelector("#status");
 const resultsEl = document.querySelector("#results");
 const emptyStateEl = document.querySelector("#empty-state");
+const viewerTitleEl = document.querySelector("#viewer-title");
+const viewerContentEl = document.querySelector("#viewer-content");
 
 let debounceTimer = null;
 
@@ -109,20 +112,66 @@ async function updateDoneVisibility() {
   doneSettingsBtn.classList.toggle("hidden", !config.vault_path);
 }
 
+// --- Default app for .md files ---
+// `is_default_md_handler` returns `Some(bool)` on macOS (a real Launch
+// Services query) or `null` everywhere else — Windows blocks programmatic
+// default-app changes entirely (a real OS restriction since Windows 8), so
+// there's no equivalent check, and no fake status is shown for it.
+const defaultHandlerStatusMsg = document.querySelector("#default-handler-status-msg");
+const setDefaultHandlerBtn = document.querySelector("#set-default-handler-btn");
+const openOsDefaultSettingsBtn = document.querySelector("#open-os-default-settings-btn");
+
+async function refreshDefaultHandlerSection() {
+  const isDefault = await invoke("is_default_md_handler");
+  if (isDefault === null || isDefault === undefined) {
+    defaultHandlerStatusMsg.textContent =
+      "Windows doesn't let apps set themselves as default — click below to open Settings, then choose Second Brain Hub for .md and .markdown.";
+    setDefaultHandlerBtn.classList.add("hidden");
+    openOsDefaultSettingsBtn.classList.remove("hidden");
+    return;
+  }
+  defaultHandlerStatusMsg.textContent = isDefault
+    ? "Second Brain Hub is currently your default .md app."
+    : "Not currently your default .md app.";
+  openOsDefaultSettingsBtn.classList.add("hidden");
+  setDefaultHandlerBtn.classList.remove("hidden");
+  setDefaultHandlerBtn.disabled = isDefault;
+  setDefaultHandlerBtn.textContent = isDefault ? "Already default" : "Set as default";
+}
+
+setDefaultHandlerBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_default_md_handler");
+  } catch (e) {
+    defaultHandlerStatusMsg.textContent = `Couldn't set as default: ${e}`;
+    return;
+  }
+  // Re-check rather than assume success — this OS call has been observed to
+  // report success without actually taking effect on some macOS versions.
+  await refreshDefaultHandlerSection();
+});
+
+openOsDefaultSettingsBtn.addEventListener("click", () => {
+  openUrl("ms-settings:defaultapps").catch((e) => alert(`Couldn't open Settings:\n${e}`));
+});
+
 function showOnboarding() {
   onboarding.classList.remove("hidden");
   searchView.classList.add("hidden");
+  viewerView.classList.add("hidden");
   onboardingError.textContent = "";
   vaultSection.refresh();
   rawSection.refresh();
   inboxSection.refresh();
   sharedRawSection.refresh();
+  refreshDefaultHandlerSection();
   updateDoneVisibility();
 }
 
 function showSearchView() {
   onboarding.classList.add("hidden");
   searchView.classList.remove("hidden");
+  viewerView.classList.add("hidden");
   searchInput.value = "";
   resultsEl.innerHTML = "";
   emptyStateEl.textContent = "";
@@ -131,6 +180,53 @@ function showSearchView() {
   refreshInboxBadge();
   refreshSharedRawBadge();
   searchInput.focus();
+}
+
+// --- Markdown viewer (read-only) ---
+
+let currentViewerPath = null;
+
+// Resolves a markdown-relative image src (e.g. "images/foo.png",
+// "../assets/x.png") against the source file's own directory, then rewrites
+// it through convertFileSrc so the webview's asset protocol can load it.
+// Skips anything already absolute or already a URL. POSIX-style path joining
+// only (`/` separators) — matches how this vault is actually laid out.
+function resolveImageSrc(src, sourceDir) {
+  if (/^([a-z]+:|\/)/i.test(src)) return src; // already absolute or a URL scheme
+  const parts = sourceDir.split("/").filter(Boolean);
+  for (const segment of src.split("/")) {
+    if (segment === "." || segment === "") continue;
+    if (segment === "..") parts.pop();
+    else parts.push(segment);
+  }
+  return "/" + parts.join("/");
+}
+
+async function openInViewer(path) {
+  let doc;
+  try {
+    doc = await invoke("render_markdown", { path });
+  } catch (e) {
+    alert(`Couldn't open file:\n${path}\n\n${e}`);
+    return;
+  }
+  currentViewerPath = doc.source_path;
+  viewerTitleEl.textContent = doc.title;
+  viewerContentEl.innerHTML = doc.html;
+
+  const sourceDir = doc.source_path.slice(0, doc.source_path.lastIndexOf("/"));
+  for (const img of viewerContentEl.querySelectorAll("img")) {
+    const src = img.getAttribute("src");
+    if (src) img.src = convertFileSrc(resolveImageSrc(src, sourceDir));
+  }
+
+  showViewer();
+}
+
+function showViewer() {
+  onboarding.classList.add("hidden");
+  searchView.classList.add("hidden");
+  viewerView.classList.remove("hidden");
 }
 
 function renderStatus(status) {
@@ -161,13 +257,9 @@ async function runSearch() {
       <div class="result-snippet">${r.snippet || ""}</div>
       <div class="result-meta">${escapeHtml(r.updated || "")}</div>
     `;
-    li.addEventListener("dblclick", () => openResultPath(r.path));
+    li.addEventListener("dblclick", () => openInViewer(r.path));
     resultsEl.appendChild(li);
   }
-}
-
-function openResultPath(path) {
-  openPath(path).catch((e) => alert(`Couldn't open file:\n${path}\n\n${e}`));
 }
 
 function escapeHtml(s) {
@@ -283,6 +375,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen("inbox-count-status", (event) => renderInboxCount(event.payload));
   listen("shared-raw-count-status", (event) => renderSharedRawCount(event.payload));
 
+  // The OS handed this launch a file to open (double-click / "Open With",
+  // once this app is a registered .md handler) — covers the already-running
+  // case (single-instance forwarding, or a later macOS open-file event).
+  listen("open-file-request", (event) => openInViewer(event.payload));
+  // Covers a cold Windows/Linux launch: the frontend wasn't listening yet
+  // when the Rust side first saw the file, so it's stashed for one pickup.
+  invoke("get_launch_file_path").then((path) => {
+    if (path) openInViewer(path);
+  });
+
   doneSettingsBtn.addEventListener("click", showSearchView);
 
   document.querySelector("#change-vault-btn").addEventListener("click", showOnboarding);
@@ -299,5 +401,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   searchInput.addEventListener("input", () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(runSearch, 200);
+  });
+
+  document.querySelector("#viewer-back-btn").addEventListener("click", showSearchView);
+  document.querySelector("#viewer-open-external-btn").addEventListener("click", () => {
+    if (currentViewerPath) {
+      openPath(currentViewerPath).catch((e) => alert(`Couldn't open file:\n${currentViewerPath}\n\n${e}`));
+    }
   });
 });

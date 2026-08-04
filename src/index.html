@@ -58,6 +58,17 @@
           </div>
         </div>
 
+        <div class="settings-section">
+          <h2>Default app for Markdown files <span class="muted">(optional)</span></h2>
+          <p>Make Second Brain Hub the app that opens when you double-click a <code>.md</code> file
+             anywhere on your Mac or PC — not just from search results here.</p>
+          <p id="default-handler-status-msg" class="muted"></p>
+          <div class="row">
+            <button id="set-default-handler-btn" class="hidden">Set as default</button>
+            <button id="open-os-default-settings-btn" class="hidden">Open Settings…</button>
+          </div>
+        </div>
+
         <div class="row">
           <button id="done-settings-btn" class="hidden">Done</button>
         </div>
@@ -87,6 +98,17 @@
           <ul id="results" class="results"></ul>
           <p id="empty-state" class="muted"></p>
         </div>
+      </section>
+
+      <!-- Markdown viewer: read-only, rendered, opened by double-clicking a
+           search result or by the OS handing this app a file to open. -->
+      <section id="viewer-view" class="viewer-view hidden">
+        <header class="topbar">
+          <button id="viewer-back-btn" class="topbar-btn" title="Back to search">← Back</button>
+          <span id="viewer-title" class="viewer-title"></span>
+          <button id="viewer-open-external-btn" class="topbar-btn" title="Open in your OS default app (e.g. to edit)">Open externally</button>
+        </header>
+        <div id="viewer-content" class="viewer-content"></div>
       </section>
     </main>
   </body>

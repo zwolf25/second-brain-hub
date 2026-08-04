@@ -12,7 +12,7 @@
     },
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "claude://*" }]
+      "allow": [{ "url": "claude://*" }, { "url": "ms-settings:*" }]
     },
     "dialog:default",
     "updater:default",
