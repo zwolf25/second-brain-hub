@@ -450,15 +450,19 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // macOS open-file/open-url event — covers both a cold launch via
             // "Open With" / default-handler double-click, and a later
             // double-click while already running (macOS routes both through
             // the same running-process Apple Event, no second process).
-            if let tauri::RunEvent::Opened { urls } = event {
+            // `RunEvent::Opened` only exists on macOS/iOS — Windows/Linux rely
+            // entirely on argv (`.setup()`'s cold-start check + the
+            // single-instance plugin's forwarded argv) instead.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
-                        handle_open_file(app_handle, path.to_string_lossy().to_string());
+                        handle_open_file(_app_handle, path.to_string_lossy().to_string());
                     }
                 }
             }
