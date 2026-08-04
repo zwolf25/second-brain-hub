@@ -9,6 +9,8 @@ pub struct AppConfig {
     pub raw_path: Option<PathBuf>,
     #[serde(default)]
     pub inbox_path: Option<PathBuf>,
+    #[serde(default)]
+    pub shared_raw_path: Option<PathBuf>,
 }
 
 fn config_file(config_dir: &Path) -> PathBuf {
@@ -107,6 +109,18 @@ pub fn autodetect_inbox() -> Option<PathBuf> {
         return None;
     }
     let candidate = autodetect_second_brain_root()?.join("inbox").join(slug);
+    candidate.is_dir().then_some(candidate)
+}
+
+/// Unlike `autodetect_raw` (the *personal* wiki-builder raw folder — a
+/// different thing, see that function's own comment), this points at the
+/// shared vault's own `raw/` folder — every teammate's unprocessed
+/// contributions, not just this user's. Purely informational (see the
+/// shared-raw badge in `lib.rs`/`main.js`): there's nothing a viewer can do
+/// about someone else's pending files, it's just a freshness signal for the
+/// wikis they're reading.
+pub fn autodetect_shared_raw() -> Option<PathBuf> {
+    let candidate = autodetect_second_brain_root()?.join("raw");
     candidate.is_dir().then_some(candidate)
 }
 

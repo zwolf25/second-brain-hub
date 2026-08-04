@@ -46,6 +46,18 @@
           </div>
         </div>
 
+        <div class="settings-section">
+          <h2>Shared vault raw notes <span class="muted">(optional)</span></h2>
+          <p>Powers the 🌐 badge — total unprocessed raw files across the whole shared Second
+             Brain (everyone's contributions, not just yours). Informational only, nothing to
+             act on — just a freshness signal.</p>
+          <p id="shared-raw-status-msg" class="muted"></p>
+          <div class="row">
+            <button id="use-shared-raw-autodetect" class="hidden">Use detected folder</button>
+            <button id="browse-shared-raw-folder">Browse for folder…</button>
+          </div>
+        </div>
+
         <div class="row">
           <button id="done-settings-btn" class="hidden">Done</button>
         </div>
@@ -54,17 +66,11 @@
       <!-- Main search view -->
       <section id="search-view" class="search-view hidden">
         <header class="topbar">
-          <div class="mode-toggle">
-            <span class="toggle-label">Keyword Search</span>
-            <label class="switch">
-              <input type="checkbox" id="mode-ai-switch" />
-              <span class="switch-track"><span class="switch-knob"></span></span>
-            </label>
-            <span class="toggle-label tooltip" data-tooltip="Find related markdowns locally — no tokens.">AI Search</span>
-          </div>
           <span id="status" class="status"></span>
           <button id="raw-badge" class="topbar-btn hidden" title="Unprocessed raw notes — click to run /wiki-builder">📄 <span id="raw-count-num">0</span></button>
           <button id="inbox-badge" class="topbar-btn hidden" title="Items in your inbox — click to run /inbox-review">📥 <span id="inbox-count-num">0</span></button>
+          <button id="shared-raw-badge" class="topbar-btn hidden" title="Unprocessed raw files across the whole shared Second Brain — no action needed, just a freshness signal. Click to open the folder.">🌐 <span id="shared-raw-count-num">0</span></button>
+          <button id="update-badge" class="topbar-btn hidden" title="A new version is available — click to download and install it.">⬇ Update available</button>
           <button id="new-session-btn" class="topbar-btn" title="Start a new Claude Code session">
             <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
           </button>
@@ -75,40 +81,11 @@
 
         <div id="search-panel" class="panel">
           <div class="search-row">
-            <input id="search-input" type="text" placeholder="Search the wiki…" autofocus />
+            <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
             <p class="hint muted">Double-click a result to open the file.</p>
           </div>
           <ul id="results" class="results"></ul>
           <p id="empty-state" class="muted"></p>
-        </div>
-
-        <div id="chat-panel" class="panel hidden">
-          <!-- Replaces the AI Search bar while the embedding model downloads/
-               loads. Selecting the AI Search toggle triggers this automatically. -->
-          <div id="chat-loading" class="chat-loading-spinner hidden">
-            <div class="spinner"></div>
-            <p id="chat-progress-label" class="muted"></p>
-            <p id="chat-enable-error" class="error"></p>
-            <button id="chat-retry-btn" class="hidden">Try again</button>
-          </div>
-
-          <!-- Shown once chat is enabled -->
-          <div id="chat-ask" class="chat-ask hidden">
-            <div class="search-row">
-              <div class="search-row-inputs">
-                <input id="chat-input" type="text" placeholder="Ask a question about the wiki… (Enter for an AI answer)" />
-                <button id="ask-btn" class="hidden">Ask</button>
-              </div>
-              <p class="hint muted">Double-click a result to open the file.</p>
-            </div>
-            <div id="chat-thinking" class="chat-thinking hidden">
-              <div class="spinner spinner-sm"></div>
-            </div>
-            <div id="answer-box" class="answer-box hidden">
-              <p id="answer-text"></p>
-            </div>
-            <ul id="related-results" class="results"></ul>
-          </div>
         </div>
       </section>
     </main>

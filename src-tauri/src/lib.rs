@@ -2,7 +2,6 @@ mod config;
 mod counts;
 mod frontmatter;
 mod index;
-mod llm;
 mod logging;
 mod search;
 mod watcher;
@@ -30,22 +29,16 @@ struct AppState {
     index_dir: PathBuf,
     config_dir: PathBuf,
     log_dir: PathBuf,
-    models_dir: PathBuf,
     tantivy: Mutex<Option<(TantivyIndex, Fields)>>,
     config: Mutex<AppConfig>,
     watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     raw_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     inbox_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
+    shared_raw_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     status: Mutex<IndexStatus>,
     raw_count: Mutex<Option<usize>>,
     inbox_count: Mutex<Option<usize>>,
-    // `Arc` so callers can clone the model/chunk-list out and drop the lock
-    // immediately, instead of holding it for the duration of the (slow)
-    // embedding computation — see §11 in ARCHITECTURE.md for the bug that
-    // caused (a concurrent `chat_availability` call blocking on this same
-    // lock while `enable_chat` was mid-computation, reading as "stuck loading").
-    embedding_model: Mutex<Option<Arc<llm::EmbeddingModel>>>,
-    chunk_embeddings: Mutex<Arc<Vec<llm::ChunkEmbedding>>>,
+    shared_raw_count: Mutex<Option<usize>>,
     _log_guard: Mutex<Option<WorkerGuard>>,
 }
 
@@ -82,21 +75,6 @@ fn reindex(app: &AppHandle) {
         Err(e) => {
             tracing::error!("failed to rebuild index: {e}");
             set_status(IndexStatus::Error);
-        }
-    }
-
-    // Only refresh chunk embeddings if chat has already been enabled this
-    // session — most collaborators who never open the Chat tab pay nothing.
-    // Clone the Arc and drop the lock immediately rather than holding it
-    // across the (slow) embedding computation below.
-    let embed_model = state.embedding_model.lock().unwrap().clone();
-    if let Some(embed_model) = embed_model {
-        match llm::build_chunk_embeddings(&vault_path, &embed_model) {
-            Ok(chunks) => {
-                tracing::info!("refreshed {} chat chunk embeddings", chunks.len());
-                *state.chunk_embeddings.lock().unwrap() = Arc::new(chunks);
-            }
-            Err(e) => tracing::error!("failed to refresh chunk embeddings: {e}"),
         }
     }
 }
@@ -149,6 +127,27 @@ fn start_watching_inbox(app: &AppHandle, inbox_path: &std::path::Path) {
     }
 }
 
+/// Same marker-based counting logic as the personal raw badge — it's
+/// folder-agnostic, so it works unchanged against the shared vault's own
+/// `raw/` folder too.
+fn recount_shared_raw(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let count = shared_raw_path.map(|p| counts::count_unprocessed_raw(&p));
+    tracing::info!("shared raw count: {count:?}");
+    *state.shared_raw_count.lock().unwrap() = count;
+    let _ = app.emit("shared-raw-count-status", count);
+}
+
+fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path) {
+    let state = app.state::<Arc<AppState>>();
+    let app_for_watcher = app.clone();
+    match watcher::start(shared_raw_path, move || recount_shared_raw(&app_for_watcher)) {
+        Ok(debouncer) => *state.shared_raw_watcher.lock().unwrap() = Some(debouncer),
+        Err(e) => tracing::warn!("failed to start shared-raw-folder watcher: {e}"),
+    }
+}
+
 #[tauri::command]
 fn get_config(state: State<Arc<AppState>>) -> AppConfig {
     state.config.lock().unwrap().clone()
@@ -194,6 +193,11 @@ fn autodetect_inbox() -> Option<String> {
 }
 
 #[tauri::command]
+fn autodetect_shared_raw() -> Option<String> {
+    config::autodetect_shared_raw().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn set_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
     if !path.is_dir() {
@@ -228,6 +232,23 @@ fn set_inbox_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> 
 }
 
 #[tauri::command]
+fn set_shared_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.shared_raw_path = Some(path.clone());
+        config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
+    }
+    *state.shared_raw_watcher.lock().unwrap() = None;
+    start_watching_shared_raw(&app, &path);
+    recount_shared_raw(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn get_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.raw_count.lock().unwrap()
 }
@@ -235,6 +256,11 @@ fn get_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
 #[tauri::command]
 fn get_inbox_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.inbox_count.lock().unwrap()
+}
+
+#[tauri::command]
+fn get_shared_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
+    *state.shared_raw_count.lock().unwrap()
 }
 
 #[tauri::command]
@@ -256,184 +282,13 @@ fn get_index_status(state: State<Arc<AppState>>) -> IndexStatus {
     *state.status.lock().unwrap()
 }
 
-#[derive(Serialize)]
-struct ChatAvailability {
-    embedding_ready: bool,
-}
-
-#[tauri::command]
-fn chat_availability(state: State<Arc<AppState>>) -> ChatAvailability {
-    let ready = state.embedding_model.lock().unwrap().is_some();
-    tracing::info!("chat_availability called, embedding_ready={ready}");
-    ChatAvailability { embedding_ready: ready }
-}
-
-#[derive(Clone, Serialize)]
-struct DownloadProgress {
-    model: String,
-    downloaded: u64,
-    total: u64,
-}
-
-fn progress_emitter(app: &AppHandle) -> impl Fn(&str, u64, u64) + '_ {
-    move |model, downloaded, total| {
-        let _ = app.emit(
-            "model-download-progress",
-            DownloadProgress { model: model.to_string(), downloaded, total },
-        );
-    }
-}
-
-/// Downloads (if needed) and loads the embedding model, then builds chunk
-/// embeddings for the current vault. Idempotent — safe to call every time the
-/// Chat tab opens.
-#[tauri::command]
-fn enable_chat(app: AppHandle, state: State<Arc<AppState>>) -> Result<usize, String> {
-    tracing::info!("enable_chat called");
-    if low_ram() {
-        return Err(
-            "Not enough free memory on this device for AI Search — showing keyword search only.".into(),
-        );
-    }
-    if state.embedding_model.lock().unwrap().is_none() {
-        tracing::info!("enable_chat: downloading/loading embedding model");
-        let paths = llm::ensure_embedding_files(&progress_emitter(&app), &state.models_dir)
-            .map_err(|e| e.to_string())?;
-        let _ = app.emit("chat-status", "Loading embedding model…");
-        let model = llm::EmbeddingModel::load(&paths).map_err(|e| e.to_string())?;
-        *state.embedding_model.lock().unwrap() = Some(Arc::new(model));
-        tracing::info!("enable_chat: embedding model loaded");
-    }
-
-    let _ = app.emit("chat-status", "Building search index for chat (one-time, may take a moment)…");
-
-    let vault_path = state
-        .config
-        .lock()
-        .unwrap()
-        .vault_path
-        .clone()
-        .ok_or("No vault configured yet.")?;
-
-    // Clone the Arc and drop the lock before the expensive part — holding it
-    // here would block any concurrent `chat_availability`/`related_docs` call
-    // (e.g. a second click while this is still running) until this finishes.
-    let model = state.embedding_model.lock().unwrap().clone().unwrap();
-    let chunks = llm::build_chunk_embeddings(&vault_path, &model).map_err(|e| e.to_string())?;
-    let count = chunks.len();
-    *state.chunk_embeddings.lock().unwrap() = Arc::new(chunks);
-    tracing::info!("enable_chat: done, {count} chunk embeddings built");
-    Ok(count)
-}
-
-#[derive(Serialize)]
-struct RelatedResult {
-    path: String,
-    title: String,
-    snippet: String,
-    score: f32,
-}
-
-/// Runs tantivy's existing keyword search for the same query, for the RRF
-/// hybrid fusion in `llm::hybrid_top_related` — returns an empty Vec (rather
-/// than erroring) if no vault is indexed yet, since keyword search is a
-/// quality boost here, not a hard requirement for chat retrieval to work.
-fn keyword_results_for(state: &Arc<AppState>, query: &str) -> Vec<SearchResult> {
-    let guard = state.tantivy.lock().unwrap();
-    match guard.as_ref() {
-        Some((idx, fields)) => search::search(idx, fields, query).unwrap_or_default(),
-        None => vec![],
-    }
-}
-
-/// Conservative safety net (ARCHITECTURE.md plan, §5) — a hard crash or a
-/// frozen machine on genuinely RAM-starved hardware is worse than skipping
-/// generation, so this is checked before any embedding/chat work, not just
-/// generation.
-///
-/// Uses `total_memory() - used_memory()`, not `available_memory()` —
-/// confirmed live on macOS that `available_memory()` returns a flat `0`
-/// (a known sysinfo/macOS gap: it undercounts reclaimable inactive/purgeable
-/// pages that `vm_stat` and Activity Monitor both count as available), which
-/// made this gate fire on every machine regardless of real headroom.
-/// `total - used` matched `vm_stat`'s real free+reclaimable estimate on a
-/// live test (~4.16GB on an 18GB Mac using ~15GB) and is well-supported
-/// cross-platform.
-const LOW_RAM_THRESHOLD_BYTES: u64 = 1_000_000_000;
-
-fn low_ram() -> bool {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    sys.total_memory().saturating_sub(sys.used_memory()) < LOW_RAM_THRESHOLD_BYTES
-}
-
-#[tauri::command]
-fn related_docs(state: State<Arc<AppState>>, query: String) -> Result<Vec<RelatedResult>, String> {
-    let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
-    let chunks = state.chunk_embeddings.lock().unwrap().clone();
-    let keyword = keyword_results_for(&state, &query);
-    // 15, not 8 — the real-vault regression test (llm.rs) confirmed the
-    // documented identifier-dense failure case now lands at rank ~13 post-fusion,
-    // not top-8; a narrower k here would silently keep dropping it.
-    let top = llm::hybrid_top_related(&model, &chunks, &query, 15, &keyword).map_err(|e| e.to_string())?;
-    Ok(top
-        .into_iter()
-        .map(|(score, c)| RelatedResult {
-            path: c.path,
-            title: c.title,
-            snippet: c.text.chars().take(240).collect(),
-            score,
-        })
-        .collect())
-}
-
-/// Retrieves context via the already-loaded embedding model, then loads the
-/// chat model fresh for this one request and drops it — no standing cost.
-#[tauri::command]
-fn write_answer(app: AppHandle, state: State<Arc<AppState>>, query: String) -> Result<String, String> {
-    if low_ram() {
-        return Err(
-            "Not enough free memory on this device for AI-written answers — showing matching docs only."
-                .into(),
-        );
-    }
-    let top = {
-        let model = state.embedding_model.lock().unwrap().clone().ok_or("Chat isn't enabled yet.")?;
-        let chunks = state.chunk_embeddings.lock().unwrap().clone();
-        let keyword = keyword_results_for(&state, &query);
-        llm::hybrid_top_related(&model, &chunks, &query, 5, &keyword).map_err(|e| e.to_string())?
-    };
-    let chat_paths = llm::ensure_chat_files(&progress_emitter(&app), &state.models_dir)
-        .map_err(|e| e.to_string())?;
-    llm::generate_answer(&chat_paths, &query, &top).map_err(|e| e.to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Caps candle's CPU backend (gemm/rayon) to a single thread — leaves real
-    // headroom for the OS/UI on a weak quad-core Chromebook-class machine, and
-    // per a public benchmark on a similarly small model (huggingface/candle
-    // #3134), single-threaded measurably beat all-cores for a model this size
-    // (69.5 tok/s vs. 53.6 tok/s) — not a speed-for-safety tradeoff.
-    //
-    // Originally set to 2 threads; dropped to 1 after a real live bug: with
-    // >1 thread, rayon's parallel float reduction in gemm doesn't guarantee a
-    // fixed summation order across runs (a known rayon+floating-point caveat —
-    // work-stealing means which worker's partial sum lands where isn't fixed),
-    // so the exact same query could silently generate a different answer on
-    // different launches of the app, including occasional degenerate ones
-    // (the model echoing the question back). Confirmed live: identical
-    // real-vault repro runs produced three different outputs for the same
-    // query before this fix. At 1 thread there's no parallel reduction to
-    // reorder — same input reliably gives the same output.
-    //
-    // Must run before any embedding/chat (candle) op, so it's the first thing
-    // `run()` does.
-    let _ = rayon::ThreadPoolBuilder::new().num_threads(1).build_global();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle();
             let config_dir = handle.path().app_config_dir()?;
@@ -444,23 +299,21 @@ pub fn run() {
 
             let config = config::load(&config_dir);
             let index_dir = data_dir.join("index");
-            let models_dir = data_dir.join("models");
 
             let state = Arc::new(AppState {
                 index_dir,
                 config_dir,
                 log_dir,
-                models_dir,
                 tantivy: Mutex::new(None),
                 config: Mutex::new(config.clone()),
                 watcher: Mutex::new(None),
                 raw_watcher: Mutex::new(None),
                 inbox_watcher: Mutex::new(None),
+                shared_raw_watcher: Mutex::new(None),
                 status: Mutex::new(IndexStatus::Idle { count: 0 }),
                 raw_count: Mutex::new(None),
                 inbox_count: Mutex::new(None),
-                embedding_model: Mutex::new(None),
-                chunk_embeddings: Mutex::new(Arc::new(Vec::new())),
+                shared_raw_count: Mutex::new(None),
                 _log_guard: Mutex::new(Some(log_guard)),
             });
             app.manage(state);
@@ -480,6 +333,11 @@ pub fn run() {
                 start_watching_inbox(&app_handle, &inbox_path);
                 recount_inbox(&app_handle);
             }
+            if let Some(shared_raw_path) = config.shared_raw_path {
+                let app_handle = handle.clone();
+                start_watching_shared_raw(&app_handle, &shared_raw_path);
+                recount_shared_raw(&app_handle);
+            }
 
             Ok(())
         })
@@ -491,16 +349,15 @@ pub fn run() {
             search_vault,
             log_dir_path,
             get_index_status,
-            chat_availability,
-            enable_chat,
-            related_docs,
-            write_answer,
             autodetect_raw,
             autodetect_inbox,
+            autodetect_shared_raw,
             set_raw_path,
             set_inbox_path,
+            set_shared_raw_path,
             get_raw_count,
             get_inbox_count,
+            get_shared_raw_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

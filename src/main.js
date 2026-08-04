@@ -2,6 +2,8 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open: openDialog } = window.__TAURI__.dialog;
 const { openPath, openUrl, revealItemInDir } = window.__TAURI__.opener;
+const { check: checkForUpdate } = window.__TAURI__.updater;
+const { relaunch } = window.__TAURI__.process;
 
 const onboarding = document.querySelector("#onboarding");
 const searchView = document.querySelector("#search-view");
@@ -91,6 +93,16 @@ const inboxSection = makePathSection({
   configKey: "inbox_path",
   required: false,
 });
+const sharedRawSection = makePathSection({
+  label: "the shared vault's raw folder",
+  statusEl: document.querySelector("#shared-raw-status-msg"),
+  useBtn: document.querySelector("#use-shared-raw-autodetect"),
+  browseBtn: document.querySelector("#browse-shared-raw-folder"),
+  autodetectCmd: "autodetect_shared_raw",
+  setCmd: "set_shared_raw_path",
+  configKey: "shared_raw_path",
+  required: false,
+});
 
 async function updateDoneVisibility() {
   const config = await invoke("get_config");
@@ -104,6 +116,7 @@ function showOnboarding() {
   vaultSection.refresh();
   rawSection.refresh();
   inboxSection.refresh();
+  sharedRawSection.refresh();
   updateDoneVisibility();
 }
 
@@ -116,6 +129,7 @@ function showSearchView() {
   invoke("get_index_status").then(renderStatus);
   refreshRawBadge();
   refreshInboxBadge();
+  refreshSharedRawBadge();
   searchInput.focus();
 }
 
@@ -162,183 +176,14 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-// --- AI Search (formerly the "Chat" tab) ---
-
-const modeAiSwitch = document.querySelector("#mode-ai-switch");
-const searchPanel = document.querySelector("#search-panel");
-const chatPanel = document.querySelector("#chat-panel");
-const chatLoading = document.querySelector("#chat-loading");
-const chatAskSection = document.querySelector("#chat-ask");
-const chatProgressLabel = document.querySelector("#chat-progress-label");
-const chatEnableError = document.querySelector("#chat-enable-error");
-const chatRetryBtn = document.querySelector("#chat-retry-btn");
-const chatInput = document.querySelector("#chat-input");
-const relatedResultsEl = document.querySelector("#related-results");
-const askBtn = document.querySelector("#ask-btn");
-const chatThinking = document.querySelector("#chat-thinking");
-const answerBox = document.querySelector("#answer-box");
-const answerTextEl = document.querySelector("#answer-text");
-
-let chatDebounceTimer = null;
-let lastChatQuery = "";
-
-function showMode(mode) {
-  console.log("[ai-search] showMode(", mode, ")");
-  const isKeyword = mode === "keyword";
-  searchPanel.classList.toggle("hidden", !isKeyword);
-  chatPanel.classList.toggle("hidden", isKeyword);
-  if (!isKeyword) activateAiSearch();
-}
-
-// Selecting the AI Search radio goes straight for it — no separate "Enable"
-// button/warning screen. Already-ready just shows the search bar; otherwise
-// this is exactly what the old Enable-AI-Chat button used to do.
-async function activateAiSearch() {
-  console.log("[ai-search] activateAiSearch() called");
-  const availability = await invoke("chat_availability");
-  console.log("[ai-search] chat_availability ->", availability);
-  if (availability.embedding_ready) {
-    console.log("[ai-search] already ready, skipping loading state");
-    chatLoading.classList.add("hidden");
-    chatAskSection.classList.remove("hidden");
-    chatInput.focus();
-    return;
-  }
-
-  console.log("[ai-search] showing loading state, calling enable_chat");
-  chatAskSection.classList.add("hidden");
-  chatLoading.classList.remove("hidden");
-  chatEnableError.textContent = "";
-  chatRetryBtn.classList.add("hidden");
-  chatProgressLabel.textContent = "Downloading embedding model…";
-
-  // The embedding computation is CPU-heavy enough to starve the webview's
-  // render thread — without yielding here, the spinner's DOM update never
-  // gets painted before the freeze hits, so it silently never appears.
-  // Force a real paint to commit before starting the heavy work.
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-  const start = Date.now();
-  try {
-    await invoke("enable_chat");
-    console.log("[ai-search] enable_chat resolved after", Date.now() - start, "ms");
-    // Models are often already cached locally, so this can finish in well
-    // under a second — force the loading state to stay visible for at least
-    // this long so it isn't just an imperceptible flash.
-    await minRemainingDelay(start, 500);
-    chatLoading.classList.add("hidden");
-    chatAskSection.classList.remove("hidden");
-    chatInput.focus();
-  } catch (e) {
-    console.log("[ai-search] enable_chat rejected:", e);
-    chatEnableError.textContent = String(e);
-    chatRetryBtn.classList.remove("hidden");
-  }
-}
-
-function minRemainingDelay(startTime, minMs) {
-  const elapsed = Date.now() - startTime;
-  return elapsed < minMs ? new Promise((r) => setTimeout(r, minMs - elapsed)) : Promise.resolve();
-}
-
-chatRetryBtn.addEventListener("click", activateAiSearch);
-
-let lastRelatedResults = [];
-
-function renderRelated(results) {
-  relatedResultsEl.innerHTML = "";
-  for (const r of results) {
-    const li = document.createElement("li");
-    li.className = "result";
-    li.innerHTML = `
-      <div class="result-title">${escapeHtml(r.title)}</div>
-      <div class="result-snippet">${escapeHtml(r.snippet)}</div>
-    `;
-    li.addEventListener("dblclick", () => openResultPath(r.path));
-    relatedResultsEl.appendChild(li);
-  }
-}
-
-// The model isn't asked for markdown, but small instruct models default to
-// it anyway (**bold**, `code`) — strip it since the answer renders as plain
-// text, not through a markdown renderer.
-function cleanAnswerText(text) {
-  return text.replace(/[*`]+/g, "");
-}
-
-async function fetchRelated(query) {
-  const results = await invoke("related_docs", { query });
-  lastRelatedResults = results;
-  askBtn.classList.toggle("hidden", results.length === 0);
-  return results;
-}
-
-// Extractive only — fires on every debounce tick while typing. Cheap and
-// near-instant, safe to run on every pause. Generation (`askForAnswer`) is
-// deliberately NOT chained off this: it's heavy enough to freeze the render
-// thread for its full duration (same class of issue as ARCHITECTURE.md §11
-// #6), so firing it on every mid-sentence typing pause reads as the whole
-// app locking up mid-keystroke. Generation only runs on explicit submit
-// (Enter key or the Ask button). The related-doc list itself stays hidden
-// until an answer has been shown (see `askForAnswer`) — only the Ask button's
-// visibility reacts to results while typing.
-async function runRelatedSearch() {
-  const query = chatInput.value.trim();
-  lastChatQuery = query;
-  answerBox.classList.add("hidden");
-  relatedResultsEl.innerHTML = ""; // clear any list left over from a previous answer
-  if (!query) {
-    lastRelatedResults = [];
-    askBtn.classList.add("hidden");
-    return;
-  }
-
-  await fetchRelated(query);
-}
-
-async function askForAnswer() {
-  const query = chatInput.value.trim();
-  if (!query) return;
-  lastChatQuery = query;
-  clearTimeout(chatDebounceTimer);
-  answerBox.classList.add("hidden");
-  answerTextEl.textContent = "";
-  relatedResultsEl.innerHTML = "";
-  chatThinking.classList.remove("hidden");
-  askBtn.disabled = true;
-
-  // Enter can be pressed before the 200ms debounce fires — make sure the
-  // related-doc list (used both for the Ask-button gate and as citations
-  // once the answer renders) is fresh for this exact query.
-  await fetchRelated(query);
-
-  // Same paint-yield fix as `enable_chat`'s loading spinner (ARCHITECTURE.md
-  // §11 #6) — the candle generation call is CPU-heavy enough to starve the
-  // render thread before the "Thinking…" indicator gets painted otherwise.
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-  try {
-    const answer = await invoke("write_answer", { query });
-    if (query !== lastChatQuery) return;
-    answerTextEl.textContent = cleanAnswerText(answer);
-    answerBox.classList.remove("hidden");
-  } catch (e) {
-    if (query !== lastChatQuery) return;
-    answerTextEl.textContent = String(e);
-    answerBox.classList.remove("hidden");
-  } finally {
-    chatThinking.classList.add("hidden");
-    askBtn.disabled = false;
-    if (query === lastChatQuery) renderRelated(lastRelatedResults);
-  }
-}
-
 // --- Raw / Inbox heads-up badges (topbar, omnipresent across tabs) ---
 
 const rawBadge = document.querySelector("#raw-badge");
 const rawCountNum = document.querySelector("#raw-count-num");
 const inboxBadge = document.querySelector("#inbox-badge");
 const inboxCountNum = document.querySelector("#inbox-count-num");
+const sharedRawBadge = document.querySelector("#shared-raw-badge");
+const sharedRawCountNum = document.querySelector("#shared-raw-count-num");
 
 function renderRawCount(count) {
   rawBadge.classList.toggle("hidden", count === null || count === undefined);
@@ -352,6 +197,12 @@ function renderInboxCount(count) {
   if (count != null) inboxCountNum.textContent = count;
 }
 
+function renderSharedRawCount(count) {
+  sharedRawBadge.classList.toggle("hidden", count === null || count === undefined);
+  sharedRawBadge.classList.toggle("count-alert", Boolean(count));
+  if (count != null) sharedRawCountNum.textContent = count;
+}
+
 async function refreshRawBadge() {
   renderRawCount(await invoke("get_raw_count"));
 }
@@ -359,6 +210,39 @@ async function refreshRawBadge() {
 async function refreshInboxBadge() {
   renderInboxCount(await invoke("get_inbox_count"));
 }
+
+async function refreshSharedRawBadge() {
+  renderSharedRawCount(await invoke("get_shared_raw_count"));
+}
+
+// --- Auto-update (checks on launch, install is user-initiated) ---
+
+const updateBadge = document.querySelector("#update-badge");
+let pendingUpdate = null;
+
+async function checkForAppUpdate() {
+  try {
+    pendingUpdate = await checkForUpdate();
+  } catch (e) {
+    console.log("[update] check failed:", e);
+    return;
+  }
+  if (pendingUpdate) updateBadge.classList.remove("hidden");
+}
+
+updateBadge.addEventListener("click", async () => {
+  if (!pendingUpdate || updateBadge.disabled) return;
+  updateBadge.disabled = true;
+  updateBadge.textContent = "Installing…";
+  try {
+    await pendingUpdate.downloadAndInstall();
+    await relaunch();
+  } catch (e) {
+    updateBadge.disabled = false;
+    updateBadge.textContent = "⬇ Update available";
+    alert(`Couldn't install the update:\n${e}`);
+  }
+});
 
 // No `folder=` param, deliberately — Claude Desktop treats a link-supplied
 // folder as untrusted and re-prompts "Trust this workspace?" every time.
@@ -371,6 +255,13 @@ function launchClaudeCommand(command) {
 
 rawBadge.addEventListener("click", () => launchClaudeCommand("/wiki-builder"));
 inboxBadge.addEventListener("click", () => launchClaudeCommand("/inbox-review"));
+
+// No Claude command to run here — there's nothing the viewer can do about
+// someone else's pending files. Just open the folder so it's still useful.
+sharedRawBadge.addEventListener("click", async () => {
+  const config = await invoke("get_config");
+  if (config.shared_raw_path) revealItemInDir(config.shared_raw_path);
+});
 
 // Bare `claude://code/new` — no `q`, opens a fresh session with nothing pre-filled.
 document.querySelector("#new-session-btn").addEventListener("click", () => {
@@ -385,32 +276,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     showOnboarding();
   }
 
+  checkForAppUpdate();
+
   listen("index-status", (event) => renderStatus(event.payload));
   listen("raw-count-status", (event) => renderRawCount(event.payload));
   listen("inbox-count-status", (event) => renderInboxCount(event.payload));
-
-  listen("model-download-progress", (event) => {
-    const { model, downloaded, total } = event.payload;
-    const mb = (n) => (n / 1_000_000).toFixed(0);
-    chatProgressLabel.textContent = `Downloading ${model} model… ${mb(downloaded)}MB / ${mb(total)}MB`;
-  });
-
-  listen("chat-status", (event) => {
-    chatProgressLabel.textContent = event.payload;
-  });
-
-  modeAiSwitch.addEventListener("change", () => showMode(modeAiSwitch.checked ? "ai" : "keyword"));
-
-  chatInput.addEventListener("input", () => {
-    clearTimeout(chatDebounceTimer);
-    chatDebounceTimer = setTimeout(runRelatedSearch, 200);
-  });
-
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") askForAnswer();
-  });
-
-  askBtn.addEventListener("click", askForAnswer);
+  listen("shared-raw-count-status", (event) => renderSharedRawCount(event.payload));
 
   doneSettingsBtn.addEventListener("click", showSearchView);
 

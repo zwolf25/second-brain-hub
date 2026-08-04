@@ -9,19 +9,20 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # `tauri-action` builds and publishes a signed release (installers +
+  # updater's `latest.json` manifest) in one step per platform — it uploads
+  # directly to GitHub Release assets via the API, not through
+  # actions/upload-artifact's blob storage, so it doesn't hit the
+  # Zscaler-blocked artifact-storage domain that forced the old
+  # build-then-separately-publish two-job workflow. Both platform jobs target
+  # the same release tag; the action handles concurrent asset uploads to one
+  # release safely (its documented multi-platform pattern), so no manual
+  # job-sequencing is needed like the old workflow required.
+  release:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-latest
-            artifact-name: windows-installers
-            bundle-paths: |
-              src-tauri/target/release/bundle/msi/*.msi
-              src-tauri/target/release/bundle/nsis/*.exe
-          - platform: macos-latest
-            artifact-name: macos-installer
-            bundle-paths: src-tauri/target/release/bundle/dmg/*.dmg
+        platform: [macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -35,45 +36,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri app
-        run: npm run tauri build
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.bundle-paths }}
-
-  # Separate job, not per-platform publishing — two parallel jobs racing to
-  # create/update the same Release tag is exactly the kind of thing that
-  # flakes. This one waits for both builds, then publishes a single Release
-  # with both installers attached.
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      # Actions' native artifact storage (productionresultssa8.blob.core.windows.net)
-      # gets connection-reset on this network — likely a Zscaler-blocked Azure
-      # endpoint. GitHub Release assets are served from a different domain, so
-      # ship installers that way instead (this only affects the final
-      # human-facing download; upload/download-artifact between jobs above is
-      # server-to-server on GitHub's infra and unaffected).
-      # Recursive globs (`**`), not `dist/<artifact>/*` — the Windows artifact
-      # was uploaded from two path patterns (msi/*.msi, nsis/*.exe), so
-      # actions/upload-artifact preserved the msi/ and nsis/ subdirectories
-      # inside it (single-pattern uploads like macOS's don't have this
-      # problem, which is why only the .dmg made it into build-1's release
-      # and the Windows installers silently matched nothing).
-      - name: Publish installers to a GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
-          files: |
-            dist/windows-installers/**/*.msi
-            dist/windows-installers/**/*.exe
-            dist/macos-installer/**/*.dmg
+          tagName: v__VERSION__
+          releaseName: "Second Brain Hub v__VERSION__"
+          releaseBody: "See the repo's commit history for what changed in this release."
+          releaseDraft: false
+          prerelease: false

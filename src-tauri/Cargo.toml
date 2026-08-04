@@ -32,13 +32,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-candle = { package = "candle-core", version = "0.11" }
-candle-nn = "0.11"
-candle-transformers = "0.11"
-tokenizers = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "native-tls"] }
-rayon = "1"
-sysinfo = "0.32"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 
 [dev-dependencies]
 tempfile = "3"
