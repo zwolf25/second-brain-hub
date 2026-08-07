@@ -16,6 +16,7 @@ const resultsEl = document.querySelector("#results");
 const emptyStateEl = document.querySelector("#empty-state");
 const viewerTitleEl = document.querySelector("#viewer-title");
 const viewerContentEl = document.querySelector("#viewer-content");
+const viewerOpenExternalBtn = document.querySelector("#viewer-open-external-btn");
 
 let debounceTimer = null;
 
@@ -213,6 +214,13 @@ async function openInViewer(path) {
   currentViewerPath = doc.source_path;
   viewerTitleEl.textContent = doc.title;
   viewerContentEl.innerHTML = doc.html;
+
+  // Opening it externally would just bounce back here (this app is the OS
+  // default handler), so hide the button rather than have it look inert.
+  // `is_default_md_handler` returns null on Windows (no query available) —
+  // keep the button in that case, matching the settings section's fallback.
+  const isDefault = await invoke("is_default_md_handler");
+  viewerOpenExternalBtn.classList.toggle("hidden", isDefault === true);
 
   const sourceDir = doc.source_path.slice(0, doc.source_path.lastIndexOf("/"));
   for (const img of viewerContentEl.querySelectorAll("img")) {
