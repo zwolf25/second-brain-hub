@@ -47,7 +47,7 @@ pub fn is_default() -> bool {
         return false;
     }
     let current = unsafe { CFString::wrap_under_create_rule(current) };
-    current.to_string() == BUNDLE_ID
+    current == BUNDLE_ID
 }
 
 #[cfg(test)]

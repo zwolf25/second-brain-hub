@@ -85,6 +85,7 @@
           <button id="new-session-btn" class="topbar-btn" title="Start a new Claude Code session">
             <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
           </button>
+          <button id="map-btn" class="topbar-btn" title="Vault Neural Map">🕸️ Map</button>
           <button id="reindex-btn" class="topbar-btn" title="Re-index now">⟳</button>
           <button id="export-logs-btn" class="topbar-btn" title="Export logs">Logs</button>
           <button id="change-vault-btn" class="topbar-btn" title="Settings">⚙</button>
@@ -109,6 +110,22 @@
           <button id="viewer-open-external-btn" class="topbar-btn" title="Open in your OS default app (e.g. to edit)">Open externally</button>
         </header>
         <div id="viewer-content" class="viewer-content"></div>
+      </section>
+
+      <!-- Vault Neural Map: force-directed graph of every wiki's [[wikilink]]
+           cross-references, sized by word count. Design-reviewed as a
+           standalone preview against real vault data before this view was built. -->
+      <section id="map-view" class="map-view hidden">
+        <header class="topbar">
+          <button id="map-back-btn" class="topbar-btn" title="Back to search">← Back</button>
+          <span class="viewer-title">Vault Neural Map</span>
+          <span id="map-stats" class="map-stats"></span>
+        </header>
+        <div class="map-canvas-wrap">
+          <canvas id="map-canvas"></canvas>
+          <div id="map-tooltip" class="map-tooltip" hidden></div>
+        </div>
+        <div class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b></div>
       </section>
     </main>
   </body>

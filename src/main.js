@@ -8,6 +8,7 @@ const { relaunch } = window.__TAURI__.process;
 const onboarding = document.querySelector("#onboarding");
 const searchView = document.querySelector("#search-view");
 const viewerView = document.querySelector("#viewer-view");
+const mapView = document.querySelector("#map-view");
 const onboardingError = document.querySelector("#onboarding-error");
 const doneSettingsBtn = document.querySelector("#done-settings-btn");
 const searchInput = document.querySelector("#search-input");
@@ -160,6 +161,7 @@ function showOnboarding() {
   onboarding.classList.remove("hidden");
   searchView.classList.add("hidden");
   viewerView.classList.add("hidden");
+  mapView.classList.add("hidden");
   onboardingError.textContent = "";
   vaultSection.refresh();
   rawSection.refresh();
@@ -173,6 +175,7 @@ function showSearchView() {
   onboarding.classList.add("hidden");
   searchView.classList.remove("hidden");
   viewerView.classList.add("hidden");
+  mapView.classList.add("hidden");
   searchInput.value = "";
   resultsEl.innerHTML = "";
   emptyStateEl.textContent = "";
@@ -235,7 +238,388 @@ function showViewer() {
   onboarding.classList.add("hidden");
   searchView.classList.add("hidden");
   viewerView.classList.remove("hidden");
+  mapView.classList.add("hidden");
 }
+
+// --- Vault Neural Map: force-directed graph of [[wikilink]] cross-references,
+// node radius by word count. Physics tuned against this vault's real link
+// density (denser than a single-vault slice usually is) — see graph.rs /
+// get_vault_graph for the node/edge source. ---
+
+const mapCanvas = document.querySelector("#map-canvas");
+const mapCtx = mapCanvas.getContext("2d");
+const mapTooltip = document.querySelector("#map-tooltip");
+const mapStatsEl = document.querySelector("#map-stats");
+
+const MAP_ACCENT = "#396cd8";
+const MAP_REPULSION_K = 7500,
+  MAP_SPRING_K = 0.015,
+  MAP_REST_LENGTH = 160,
+  MAP_CENTER_K = 0.006,
+  MAP_VELOCITY_DECAY = 0.6,
+  MAP_ALPHA_DECAY = 0.0175,
+  MAP_ALPHA_MIN = 0.001,
+  MAP_MAX_SPEED = 40,
+  MAP_COLLIDE_PAD = 14,
+  MAP_COLLIDE_K = 0.9,
+  MAP_RMIN = 4,
+  MAP_RMAX = 18;
+
+const mapState = {
+  nodes: [],
+  edges: [],
+  adjacency: new Map(),
+  view: { x: 0, y: 0, k: 1 },
+  alpha: 1,
+  dragNode: null,
+  panning: false,
+  panStart: null,
+  viewStart: null,
+  hovered: null,
+  selected: null,
+  dpr: 1,
+  running: false,
+};
+
+function mapRadiusFor(words, wMin, wMax) {
+  if (wMax === wMin) return (MAP_RMIN + MAP_RMAX) / 2;
+  const t = Math.sqrt((words - wMin) / (wMax - wMin));
+  return MAP_RMIN + t * (MAP_RMAX - MAP_RMIN);
+}
+
+function mapTick() {
+  const s = mapState;
+  s.alpha = Math.max(MAP_ALPHA_MIN, s.alpha * (1 - MAP_ALPHA_DECAY));
+  for (let i = 0; i < s.nodes.length; i++) {
+    for (let j = i + 1; j < s.nodes.length; j++) {
+      const a = s.nodes[i],
+        b = s.nodes[j];
+      const dx = a.x - b.x,
+        dy = a.y - b.y;
+      const distSq = dx * dx + dy * dy || 0.01,
+        dist = Math.sqrt(distSq);
+      const f = (MAP_REPULSION_K / distSq) * s.alpha;
+      const fx = (dx / dist) * f,
+        fy = (dy / dist) * f;
+      a.vx += fx;
+      a.vy += fy;
+      b.vx -= fx;
+      b.vy -= fy;
+      const minDist = a.r + b.r + MAP_COLLIDE_PAD;
+      if (dist < minDist) {
+        const push = (minDist - dist) * MAP_COLLIDE_K;
+        const cfx = (dx / dist) * push,
+          cfy = (dy / dist) * push;
+        a.vx += cfx;
+        a.vy += cfy;
+        b.vx -= cfx;
+        b.vy -= cfy;
+      }
+    }
+  }
+  for (const e of s.edges) {
+    const dx = e.t.x - e.s.x,
+      dy = e.t.y - e.s.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    const f = MAP_SPRING_K * (dist - MAP_REST_LENGTH) * s.alpha;
+    const fx = (dx / dist) * f,
+      fy = (dy / dist) * f;
+    e.s.vx += fx;
+    e.s.vy += fy;
+    e.t.vx -= fx;
+    e.t.vy -= fy;
+  }
+  for (const n of s.nodes) {
+    if (n.fx != null) {
+      n.x = n.fx;
+      n.y = n.fy;
+      n.vx = 0;
+      n.vy = 0;
+      continue;
+    }
+    n.vx += -n.x * MAP_CENTER_K * s.alpha;
+    n.vy += -n.y * MAP_CENTER_K * s.alpha;
+    n.vx *= MAP_VELOCITY_DECAY;
+    n.vy *= MAP_VELOCITY_DECAY;
+    const speed = Math.hypot(n.vx, n.vy);
+    if (speed > MAP_MAX_SPEED) {
+      n.vx *= MAP_MAX_SPEED / speed;
+      n.vy *= MAP_MAX_SPEED / speed;
+    }
+    n.x += n.vx;
+    n.y += n.vy;
+  }
+}
+
+function mapScreenToWorld(sx, sy) {
+  const v = mapState.view;
+  return [(sx - v.x) / v.k, (sy - v.y) / v.k];
+}
+
+function mapHitTest(sx, sy) {
+  const [wx, wy] = mapScreenToWorld(sx, sy);
+  let best = null,
+    bestD = Infinity;
+  for (const n of mapState.nodes) {
+    const d = (wx - n.x) ** 2 + (wy - n.y) ** 2;
+    const rr = (n.r + 3) ** 2;
+    if (d <= rr && d < bestD) {
+      best = n;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function mapFitToView() {
+  const rect = mapCanvas.parentElement.getBoundingClientRect();
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const n of mapState.nodes) {
+    minX = Math.min(minX, n.x - n.r);
+    maxX = Math.max(maxX, n.x + n.r);
+    minY = Math.min(minY, n.y - n.r);
+    maxY = Math.max(maxY, n.y + n.r);
+  }
+  if (!isFinite(minX)) return;
+  const w = Math.max(1, maxX - minX),
+    h = Math.max(1, maxY - minY);
+  const k = Math.min(4, Math.max(0.2, Math.min(rect.width / w, rect.height / h) * 0.82));
+  mapState.view.k = k;
+  mapState.view.x = rect.width / 2 - ((minX + maxX) / 2) * k;
+  mapState.view.y = rect.height / 2 - ((minY + maxY) / 2) * k;
+}
+
+function mapDraw() {
+  const rect = mapCanvas.parentElement.getBoundingClientRect();
+  const dpr = mapState.dpr,
+    v = mapState.view;
+  const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const ink = isDark ? "#f0f0f0" : "#0f0f0f";
+  const inkMuted = isDark ? "#aaa" : "#777";
+  const border = isDark ? "rgba(240,240,240,0.14)" : "rgba(15,15,15,0.12)";
+
+  mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mapCtx.clearRect(0, 0, rect.width, rect.height);
+  mapCtx.setTransform(v.k * dpr, 0, 0, v.k * dpr, v.x * dpr, v.y * dpr);
+
+  const selected = mapState.selected,
+    hovered = mapState.hovered;
+  const dimming = !!selected;
+  const activeSet = selected ? mapState.adjacency.get(selected.id) : null;
+
+  mapCtx.lineWidth = 1 / v.k;
+  for (const e of mapState.edges) {
+    const involved = selected && (e.s === selected || e.t === selected);
+    mapCtx.strokeStyle = dimming ? (involved ? MAP_ACCENT : border) : border;
+    mapCtx.globalAlpha = dimming && !involved ? 0.15 : involved ? 0.65 : 1;
+    mapCtx.beginPath();
+    mapCtx.moveTo(e.s.x, e.s.y);
+    mapCtx.lineTo(e.t.x, e.t.y);
+    mapCtx.stroke();
+  }
+  mapCtx.globalAlpha = 1;
+
+  for (const n of mapState.nodes) {
+    const dim = dimming && n !== selected && !(activeSet && activeSet.has(n.id));
+    mapCtx.globalAlpha = dim ? 0.3 : 1;
+    mapCtx.beginPath();
+    mapCtx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    mapCtx.fillStyle = MAP_ACCENT;
+    mapCtx.fill();
+    if (n === selected || n === hovered) {
+      mapCtx.lineWidth = 1.5 / v.k;
+      mapCtx.strokeStyle = ink;
+      mapCtx.stroke();
+    }
+    mapCtx.globalAlpha = 1;
+  }
+
+  const showLabels = v.k > 0.9;
+  mapCtx.font = 11 / v.k + "px " + getComputedStyle(document.body).fontFamily;
+  mapCtx.textBaseline = "top";
+  for (const n of mapState.nodes) {
+    const isFocus = n === hovered || n === selected;
+    if (!showLabels && !isFocus) continue;
+    const dim = dimming && n !== selected && !(activeSet && activeSet.has(n.id));
+    if (dim && !isFocus) continue;
+    mapCtx.fillStyle = isFocus ? ink : inkMuted;
+    mapCtx.fillText(n.id, n.x + n.r + 4 / v.k, n.y - 5 / v.k);
+  }
+}
+
+function mapFrame() {
+  if (!mapState.running) return;
+  const active = mapState.dragNode || mapState.alpha > MAP_ALPHA_MIN;
+  if (active) mapTick();
+  mapDraw();
+  requestAnimationFrame(mapFrame);
+}
+
+function mapResize() {
+  mapState.dpr = Math.max(1, window.devicePixelRatio || 1);
+  const rect = mapCanvas.parentElement.getBoundingClientRect();
+  mapCanvas.width = rect.width * mapState.dpr;
+  mapCanvas.height = rect.height * mapState.dpr;
+  mapCanvas.style.width = rect.width + "px";
+  mapCanvas.style.height = rect.height + "px";
+}
+
+function rebuildMapSim(graphData) {
+  const byId = new Map();
+  const words = graphData.nodes.map((n) => n.words);
+  const wMin = Math.min(...words, 0),
+    wMax = Math.max(...words, 0);
+  const nodes = graphData.nodes.map((n) => {
+    const angle = Math.random() * Math.PI * 2,
+      r = Math.random() * 500;
+    const node = {
+      id: n.id,
+      words: n.words,
+      r: mapRadiusFor(n.words, wMin, wMax),
+      x: Math.cos(angle) * r,
+      y: Math.sin(angle) * r,
+      vx: 0,
+      vy: 0,
+      fx: null,
+      fy: null,
+      degree: 0,
+    };
+    byId.set(n.id, node);
+    return node;
+  });
+  const edges = graphData.edges
+    .filter((e) => byId.has(e.source) && byId.has(e.target))
+    .map((e) => ({ s: byId.get(e.source), t: byId.get(e.target) }));
+  edges.forEach((e) => {
+    e.s.degree++;
+    e.t.degree++;
+  });
+  const adjacency = new Map();
+  nodes.forEach((n) => adjacency.set(n.id, new Set()));
+  edges.forEach((e) => {
+    adjacency.get(e.s.id).add(e.t.id);
+    adjacency.get(e.t.id).add(e.s.id);
+  });
+
+  mapState.nodes = nodes;
+  mapState.edges = edges;
+  mapState.adjacency = adjacency;
+  mapState.alpha = 1;
+  mapState.selected = null;
+  mapState.hovered = null;
+  mapResize();
+  for (let i = 0; i < 700; i++) mapTick();
+  mapFitToView();
+  mapStatsEl.textContent = `${nodes.length} wikis · ${edges.length} links`;
+  mapDraw();
+}
+
+async function showMapView() {
+  onboarding.classList.add("hidden");
+  searchView.classList.add("hidden");
+  viewerView.classList.add("hidden");
+  mapView.classList.remove("hidden");
+  const graphData = await invoke("get_vault_graph");
+  rebuildMapSim(graphData);
+  if (!mapState.running) {
+    mapState.running = true;
+    requestAnimationFrame(mapFrame);
+  }
+}
+
+new ResizeObserver(() => {
+  if (!mapView.classList.contains("hidden")) {
+    mapResize();
+    mapDraw();
+  }
+}).observe(mapCanvas.parentElement);
+
+mapCanvas.addEventListener("mousedown", (e) => {
+  const rect = mapCanvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left,
+    sy = e.clientY - rect.top;
+  const hit = mapHitTest(sx, sy);
+  if (hit) {
+    mapState.dragNode = hit;
+    const [wx, wy] = mapScreenToWorld(sx, sy);
+    hit.fx = wx;
+    hit.fy = wy;
+    mapState.alpha = Math.max(mapState.alpha, 0.3);
+  } else {
+    mapState.panning = true;
+    mapState.panStart = [sx, sy];
+    mapState.viewStart = [mapState.view.x, mapState.view.y];
+  }
+  mapCanvas.classList.add("dragging");
+});
+window.addEventListener("mousemove", (e) => {
+  if (mapView.classList.contains("hidden")) return;
+  const rect = mapCanvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left,
+    sy = e.clientY - rect.top;
+  if (mapState.dragNode) {
+    const [wx, wy] = mapScreenToWorld(sx, sy);
+    mapState.dragNode.fx = wx;
+    mapState.dragNode.fy = wy;
+    return;
+  }
+  if (mapState.panning) {
+    mapState.view.x = mapState.viewStart[0] + (sx - mapState.panStart[0]);
+    mapState.view.y = mapState.viewStart[1] + (sy - mapState.panStart[1]);
+    return;
+  }
+  if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) {
+    if (mapState.hovered) {
+      mapState.hovered = null;
+      mapTooltip.hidden = true;
+    }
+    return;
+  }
+  const hit = mapHitTest(sx, sy);
+  mapState.hovered = hit;
+  if (hit) {
+    mapTooltip.hidden = false;
+    mapTooltip.style.left = sx + 14 + "px";
+    mapTooltip.style.top = sy + 14 + "px";
+    mapTooltip.innerHTML =
+      `<div class="tt-name">${escapeHtml(hit.id)}</div>` +
+      `<div class="tt-meta">${hit.words.toLocaleString()} words · ${hit.degree} link${hit.degree === 1 ? "" : "s"}</div>`;
+  } else {
+    mapTooltip.hidden = true;
+  }
+});
+window.addEventListener("mouseup", () => {
+  if (mapState.dragNode) {
+    mapState.dragNode.fx = null;
+    mapState.dragNode.fy = null;
+    mapState.dragNode = null;
+  }
+  mapState.panning = false;
+  mapCanvas.classList.remove("dragging");
+});
+mapCanvas.addEventListener("click", (e) => {
+  const rect = mapCanvas.getBoundingClientRect();
+  const hit = mapHitTest(e.clientX - rect.left, e.clientY - rect.top);
+  mapState.selected = hit && hit === mapState.selected ? null : hit;
+});
+mapCanvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const rect = mapCanvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left,
+      sy = e.clientY - rect.top;
+    const [wx, wy] = mapScreenToWorld(sx, sy);
+    const factor = Math.exp(-e.deltaY * 0.001);
+    mapState.view.k = Math.min(4, Math.max(0.2, mapState.view.k * factor));
+    mapState.view.x = sx - wx * mapState.view.k;
+    mapState.view.y = sy - wy * mapState.view.k;
+  },
+  { passive: false },
+);
 
 function renderStatus(status) {
   if (status.state === "indexing") {
@@ -382,6 +766,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen("raw-count-status", (event) => renderRawCount(event.payload));
   listen("inbox-count-status", (event) => renderInboxCount(event.payload));
   listen("shared-raw-count-status", (event) => renderSharedRawCount(event.payload));
+  // Pushed by the Rust side after every reindex (launch, manual, or file-watcher
+  // triggered) — live-updates the map only while it's actually the visible view.
+  listen("graph-updated", (event) => {
+    if (!mapView.classList.contains("hidden")) rebuildMapSim(event.payload);
+  });
 
   // The OS handed this launch a file to open (double-click / "Open With",
   // once this app is a registered .md handler) — covers the already-running
@@ -400,6 +789,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.querySelector("#reindex-btn").addEventListener("click", () => {
     invoke("reindex_now");
   });
+
+  document.querySelector("#map-btn").addEventListener("click", showMapView);
+  document.querySelector("#map-back-btn").addEventListener("click", showSearchView);
 
   document.querySelector("#export-logs-btn").addEventListener("click", async () => {
     const dir = await invoke("log_dir_path");

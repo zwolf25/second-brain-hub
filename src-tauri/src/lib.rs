@@ -3,6 +3,7 @@ mod counts;
 #[cfg(target_os = "macos")]
 mod default_handler;
 mod frontmatter;
+mod graph;
 mod index;
 mod logging;
 mod render;
@@ -89,6 +90,10 @@ fn reindex(app: &AppHandle) {
                 *state.tantivy.lock().unwrap() = Some((idx, fields));
                 tracing::info!("indexed {count} docs from {}", vault_path.display());
                 set_status(IndexStatus::Idle { count });
+                // Push a fresh link graph on every reindex (launch, manual, or
+                // file-watcher-triggered) — the Vault Neural Map view live-updates
+                // off this event instead of needing its own re-open to refresh.
+                let _ = app.emit("graph-updated", graph::build_graph(&vault_path));
             }
             Err(e) => {
                 tracing::error!("failed to open index after rebuild: {e}");
@@ -296,6 +301,15 @@ fn search_vault(state: State<Arc<AppState>>, query: String) -> Result<Vec<Search
 }
 
 #[tauri::command]
+fn get_vault_graph(state: State<Arc<AppState>>) -> graph::GraphData {
+    let vault_path = state.config.lock().unwrap().vault_path.clone();
+    match vault_path {
+        Some(p) => graph::build_graph(&p),
+        None => graph::GraphData::default(),
+    }
+}
+
+#[tauri::command]
 fn log_dir_path(state: State<Arc<AppState>>) -> String {
     state.log_dir.to_string_lossy().to_string()
 }
@@ -399,7 +413,7 @@ pub fn run() {
             // args() here is just the app binary path on that platform).
             if let Some(path) = std::env::args().nth(1) {
                 if std::path::Path::new(&path).is_file() {
-                    handle_open_file(&handle, path);
+                    handle_open_file(handle, path);
                 }
             }
 
@@ -432,6 +446,7 @@ pub fn run() {
             set_vault_path,
             reindex_now,
             search_vault,
+            get_vault_graph,
             log_dir_path,
             get_index_status,
             autodetect_raw,
