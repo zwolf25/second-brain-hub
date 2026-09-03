@@ -6,6 +6,7 @@ use std::path::Path;
 pub struct GraphNode {
     id: String,
     words: usize,
+    path: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -51,7 +52,7 @@ fn word_count(body: &str) -> usize {
 /// since `frontmatter::parse` strips `[[`/`]]` brackets for search snippets —
 /// this needs the link targets those brackets carry.
 pub fn build_graph(vault_path: &Path) -> GraphData {
-    let mut texts: HashMap<String, String> = HashMap::new();
+    let mut texts: HashMap<String, (String, String)> = HashMap::new(); // id -> (path, text)
     let Ok(entries) = std::fs::read_dir(vault_path) else {
         return GraphData::default();
     };
@@ -65,17 +66,17 @@ pub fn build_graph(vault_path: &Path) -> GraphData {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        texts.insert(stem.to_string(), text);
+        texts.insert(stem.to_string(), (path.to_string_lossy().into_owned(), text));
     }
 
     let nodes: Vec<GraphNode> = texts
         .iter()
-        .map(|(id, text)| GraphNode { id: id.clone(), words: word_count(text) })
+        .map(|(id, (path, text))| GraphNode { id: id.clone(), words: word_count(text), path: path.clone() })
         .collect();
 
     let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
     let mut edges = Vec::new();
-    for (name, text) in &texts {
+    for (name, (_, text)) in &texts {
         for target in wikilink_targets(text) {
             if &target == name || !texts.contains_key(&target) {
                 continue;

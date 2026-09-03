@@ -189,6 +189,7 @@ function showSearchView() {
 // --- Markdown viewer (read-only) ---
 
 let currentViewerPath = null;
+let viewerReturnTo = "search"; // "search" | "map" — which view the viewer's Back button returns to
 
 // Resolves a markdown-relative image src (e.g. "images/foo.png",
 // "../assets/x.png") against the source file's own directory, then rewrites
@@ -206,7 +207,8 @@ function resolveImageSrc(src, sourceDir) {
   return "/" + parts.join("/");
 }
 
-async function openInViewer(path) {
+async function openInViewer(path, returnTo = "search") {
+  viewerReturnTo = returnTo;
   let doc;
   try {
     doc = await invoke("render_markdown", { path });
@@ -478,6 +480,7 @@ function rebuildMapSim(graphData) {
     const node = {
       id: n.id,
       words: n.words,
+      path: n.path,
       r: mapRadiusFor(n.words, wMin, wMax),
       x: Math.cos(angle) * r,
       y: Math.sin(angle) * r,
@@ -604,6 +607,11 @@ mapCanvas.addEventListener("click", (e) => {
   const rect = mapCanvas.getBoundingClientRect();
   const hit = mapHitTest(e.clientX - rect.left, e.clientY - rect.top);
   mapState.selected = hit && hit === mapState.selected ? null : hit;
+});
+mapCanvas.addEventListener("dblclick", (e) => {
+  const rect = mapCanvas.getBoundingClientRect();
+  const hit = mapHitTest(e.clientX - rect.left, e.clientY - rect.top);
+  if (hit) openInViewer(hit.path, "map");
 });
 mapCanvas.addEventListener(
   "wheel",
@@ -803,7 +811,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     debounceTimer = setTimeout(runSearch, 200);
   });
 
-  document.querySelector("#viewer-back-btn").addEventListener("click", showSearchView);
+  document.querySelector("#viewer-back-btn").addEventListener("click", () => {
+    if (viewerReturnTo === "map") showMapView();
+    else showSearchView();
+  });
   document.querySelector("#viewer-open-external-btn").addEventListener("click", () => {
     if (currentViewerPath) {
       openPath(currentViewerPath).catch((e) => alert(`Couldn't open file:\n${currentViewerPath}\n\n${e}`));
