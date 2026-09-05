@@ -6,6 +6,7 @@ mod frontmatter;
 mod graph;
 mod index;
 mod logging;
+mod plugins;
 mod render;
 mod search;
 mod watcher;
@@ -43,6 +44,7 @@ struct AppState {
     raw_count: Mutex<Option<usize>>,
     inbox_count: Mutex<Option<usize>>,
     shared_raw_count: Mutex<Option<usize>>,
+    plugin_drift: Mutex<Vec<plugins::PluginDrift>>,
     _log_guard: Mutex<Option<WorkerGuard>>,
 }
 
@@ -176,6 +178,25 @@ fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path)
     }
 }
 
+/// Checked once at launch, like `checkForAppUpdate` — plugin versions don't
+/// change mid-session, so there's no watcher here (unlike the raw/inbox counts).
+/// Shared vault root is the shared-raw folder's parent, since
+/// `autodetect_shared_raw` points that path at `<root>/raw`.
+fn check_plugin_drift(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let Some(root) = shared_raw_path.as_deref().and_then(|p| p.parent()) else {
+        return;
+    };
+    let Some(home) = config::dirs_home() else {
+        return;
+    };
+    let installed_path = home.join(".claude/plugins/installed_plugins.json");
+    let drift = plugins::check_drift(root, &installed_path);
+    tracing::info!("plugin drift: {} plugin(s) behind", drift.len());
+    *state.plugin_drift.lock().unwrap() = drift;
+}
+
 #[tauri::command]
 fn get_config(state: State<Arc<AppState>>) -> AppConfig {
     state.config.lock().unwrap().clone()
@@ -273,6 +294,7 @@ fn set_shared_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String
     *state.shared_raw_watcher.lock().unwrap() = None;
     start_watching_shared_raw(&app, &path);
     recount_shared_raw(&app);
+    check_plugin_drift(&app);
     Ok(())
 }
 
@@ -289,6 +311,11 @@ fn get_inbox_count(state: State<Arc<AppState>>) -> Option<usize> {
 #[tauri::command]
 fn get_shared_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.shared_raw_count.lock().unwrap()
+}
+
+#[tauri::command]
+fn get_plugin_drift(state: State<Arc<AppState>>) -> Vec<plugins::PluginDrift> {
+    state.plugin_drift.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -404,6 +431,7 @@ pub fn run() {
                 raw_count: Mutex::new(None),
                 inbox_count: Mutex::new(None),
                 shared_raw_count: Mutex::new(None),
+                plugin_drift: Mutex::new(Vec::new()),
                 _log_guard: Mutex::new(Some(log_guard)),
             });
             app.manage(state);
@@ -437,6 +465,7 @@ pub fn run() {
                 start_watching_shared_raw(&app_handle, &shared_raw_path);
                 recount_shared_raw(&app_handle);
             }
+            check_plugin_drift(handle);
 
             Ok(())
         })
@@ -458,6 +487,7 @@ pub fn run() {
             get_raw_count,
             get_inbox_count,
             get_shared_raw_count,
+            get_plugin_drift,
             render_markdown,
             get_launch_file_path,
             is_default_md_handler,

@@ -124,7 +124,7 @@ pub fn autodetect_shared_raw() -> Option<PathBuf> {
     candidate.is_dir().then_some(candidate)
 }
 
-fn dirs_home() -> Option<PathBuf> {
+pub(crate) fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)

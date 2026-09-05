@@ -707,6 +707,21 @@ async function refreshSharedRawBadge() {
   renderSharedRawCount(await invoke("get_shared_raw_count"));
 }
 
+const pluginDriftBadge = document.querySelector("#plugin-drift-badge");
+const pluginDriftCountNum = document.querySelector("#plugin-drift-count-num");
+let pluginDrift = [];
+
+function renderPluginDrift(drift) {
+  pluginDrift = drift;
+  pluginDriftBadge.classList.toggle("hidden", drift.length === 0);
+  pluginDriftBadge.classList.toggle("count-alert", drift.length > 0);
+  pluginDriftCountNum.textContent = drift.length;
+}
+
+async function checkPluginDrift() {
+  renderPluginDrift(await invoke("get_plugin_drift"));
+}
+
 // --- Auto-update (checks on launch, install is user-initiated) ---
 
 const updateBadge = document.querySelector("#update-badge");
@@ -748,6 +763,11 @@ function launchClaudeCommand(command) {
 rawBadge.addEventListener("click", () => launchClaudeCommand("/wiki-builder"));
 inboxBadge.addEventListener("click", () => launchClaudeCommand("/inbox-review"));
 
+pluginDriftBadge.addEventListener("click", () => {
+  const names = pluginDrift.map((d) => d.key);
+  launchClaudeCommand(`Update these outdated Second Brain plugins: ${names.join(", ")}`);
+});
+
 // No Claude command to run here — there's nothing the viewer can do about
 // someone else's pending files. Just open the folder so it's still useful.
 sharedRawBadge.addEventListener("click", async () => {
@@ -769,6 +789,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   checkForAppUpdate();
+  checkPluginDrift();
 
   listen("index-status", (event) => renderStatus(event.payload));
   listen("raw-count-status", (event) => renderRawCount(event.payload));
