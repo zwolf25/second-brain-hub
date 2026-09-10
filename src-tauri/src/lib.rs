@@ -9,6 +9,7 @@ mod logging;
 mod plugins;
 mod render;
 mod search;
+mod skills;
 mod watcher;
 
 use config::AppConfig;
@@ -318,6 +319,18 @@ fn get_plugin_drift(state: State<Arc<AppState>>) -> Vec<plugins::PluginDrift> {
     state.plugin_drift.lock().unwrap().clone()
 }
 
+/// Resolved fresh on every call (same shared-vault-root logic as
+/// `check_plugin_drift`) — a ~150-file walk is cheap enough that caching
+/// would only risk staleness for no measurable benefit.
+#[tauri::command]
+fn get_skills(state: State<Arc<AppState>>) -> Vec<skills::SkillInfo> {
+    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let Some(root) = shared_raw_path.as_deref().and_then(|p| p.parent()) else {
+        return vec![];
+    };
+    skills::list_skills(root)
+}
+
 #[tauri::command]
 fn search_vault(state: State<Arc<AppState>>, query: String) -> Result<Vec<SearchResult>, String> {
     let guard = state.tantivy.lock().unwrap();
@@ -488,6 +501,7 @@ pub fn run() {
             get_inbox_count,
             get_shared_raw_count,
             get_plugin_drift,
+            get_skills,
             render_markdown,
             get_launch_file_path,
             is_default_md_handler,

@@ -10,68 +10,84 @@
 
   <body>
     <main class="app">
-      <!-- Onboarding / settings: shown until a valid vault folder is configured,
-           and reopened later by the ⚙ button to adjust any of the three paths -->
-      <section id="onboarding" class="onboarding hidden">
-        <h1>Second Brain Hub</h1>
+      <!-- Settings: shown until a valid vault folder is configured, and
+           reopened later by the ⚙ button to adjust any of the three paths -->
+      <section id="onboarding" class="settings-view hidden">
+        <header class="topbar">
+          <button id="settings-back-btn" class="topbar-btn hidden" title="Back to search">← Back</button>
+          <span class="viewer-title">Settings</span>
+        </header>
+        <ul class="settings-list">
+          <li class="settings-group-label">Folders</li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Wikis <span class="setting-req">(required)</span></span>
+              <span id="vault-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="use-vault-autodetect" class="topbar-btn hidden">Use detected folder</button>
+              <button id="browse-vault-folder" class="topbar-btn">Browse for folder…</button>
+            </div>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Raw notes <span class="setting-opt">(optional)</span></span>
+              <span id="raw-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="use-raw-autodetect" class="topbar-btn hidden">Use detected folder</button>
+              <button id="browse-raw-folder" class="topbar-btn">Browse for folder…</button>
+            </div>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Inbox <span class="setting-opt">(optional)</span></span>
+              <span id="inbox-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="use-inbox-autodetect" class="topbar-btn hidden">Use detected folder</button>
+              <button id="browse-inbox-folder" class="topbar-btn">Browse for folder…</button>
+            </div>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Shared vault raw notes <span class="setting-opt">(optional)</span></span>
+              <span id="shared-raw-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="use-shared-raw-autodetect" class="topbar-btn hidden">Use detected folder</button>
+              <button id="browse-shared-raw-folder" class="topbar-btn">Browse for folder…</button>
+            </div>
+          </li>
 
-        <div class="settings-section">
-          <h2>Wikis <span class="muted">(required)</span></h2>
-          <p>Point this app at your local copy of the shared SC Second Brain wikis folder.</p>
-          <p id="vault-status-msg" class="muted"></p>
-          <div class="row">
-            <button id="use-vault-autodetect" class="hidden">Use detected folder</button>
-            <button id="browse-vault-folder">Browse for folder…</button>
-          </div>
-          <p id="onboarding-error" class="error"></p>
-        </div>
+          <li class="settings-group-label">Default app</li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Markdown (.md) files</span>
+              <span id="default-handler-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="set-default-handler-btn" class="topbar-btn hidden">Set as default</button>
+              <button id="open-os-default-settings-btn" class="topbar-btn hidden">Open Settings…</button>
+            </div>
+          </li>
 
-        <div class="settings-section">
-          <h2>Raw notes <span class="muted">(optional)</span></h2>
-          <p>Powers the 📄 raw-file heads-up badge (runs <code>wiki-builder</code>).</p>
-          <p id="raw-status-msg" class="muted"></p>
-          <div class="row">
-            <button id="use-raw-autodetect" class="hidden">Use detected folder</button>
-            <button id="browse-raw-folder">Browse for folder…</button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h2>Inbox <span class="muted">(optional)</span></h2>
-          <p>Powers the 📥 inbox heads-up badge (runs <code>inbox-review</code>).</p>
-          <p id="inbox-status-msg" class="muted"></p>
-          <div class="row">
-            <button id="use-inbox-autodetect" class="hidden">Use detected folder</button>
-            <button id="browse-inbox-folder">Browse for folder…</button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h2>Shared vault raw notes <span class="muted">(optional)</span></h2>
-          <p>Powers the 🌐 badge — total unprocessed raw files across the whole shared Second
-             Brain (everyone's contributions, not just yours). Informational only, nothing to
-             act on — just a freshness signal.</p>
-          <p id="shared-raw-status-msg" class="muted"></p>
-          <div class="row">
-            <button id="use-shared-raw-autodetect" class="hidden">Use detected folder</button>
-            <button id="browse-shared-raw-folder">Browse for folder…</button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h2>Default app for Markdown files <span class="muted">(optional)</span></h2>
-          <p>Make Second Brain Hub the app that opens when you double-click a <code>.md</code> file
-             anywhere on your Mac or PC — not just from search results here.</p>
-          <p id="default-handler-status-msg" class="muted"></p>
-          <div class="row">
-            <button id="set-default-handler-btn" class="hidden">Set as default</button>
-            <button id="open-os-default-settings-btn" class="hidden">Open Settings…</button>
-          </div>
-        </div>
-
-        <div class="row">
-          <button id="done-settings-btn" class="hidden">Done</button>
-        </div>
+          <li class="settings-group-label">Diagnostics</li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Logs</span>
+              <span class="setting-value">Export a support bundle for troubleshooting</span>
+            </div>
+            <button id="export-logs-btn" class="topbar-btn">Export Logs</button>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Version</span>
+              <span class="setting-value" id="app-version-value">—</span>
+            </div>
+          </li>
+        </ul>
+        <p id="onboarding-error" class="error"></p>
       </section>
 
       <!-- Main search view -->
@@ -81,18 +97,20 @@
           <button id="raw-badge" class="topbar-btn hidden" title="Unprocessed raw notes — click to run /wiki-builder">📄 <span id="raw-count-num">0</span></button>
           <button id="inbox-badge" class="topbar-btn hidden" title="Items in your inbox — click to run /inbox-review">📥 <span id="inbox-count-num">0</span></button>
           <button id="shared-raw-badge" class="topbar-btn hidden" title="Unprocessed raw files across the whole shared Second Brain — no action needed, just a freshness signal. Click to open the folder.">🌐 <span id="shared-raw-count-num">0</span></button>
-          <button id="update-badge" class="topbar-btn hidden" title="A new version is available — click to download and install it.">⬇ Update available</button>
-          <button id="plugin-drift-badge" class="topbar-btn hidden" title="Some skill plugins are behind the vault — click to update">🧩 <span id="plugin-drift-count-num">0</span></button>
+          <button id="skills-badge" class="topbar-btn" title="See all skills" data-tooltip="See all skills">🧩 Skills</button>
           <button id="new-session-btn" class="topbar-btn" title="Start a new Claude Code session">
             <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
           </button>
-          <button id="map-btn" class="topbar-btn" title="Vault Neural Map">🕸️ Map</button>
-          <button id="reindex-btn" class="topbar-btn" title="Re-index now">⟳</button>
-          <button id="export-logs-btn" class="topbar-btn" title="Export logs">Logs</button>
-          <button id="change-vault-btn" class="topbar-btn" title="Settings">⚙</button>
+          <button id="map-btn" class="topbar-btn" title="Vault Neural Map">🧠 Map</button>
+          <button id="reindex-btn" class="topbar-btn" title="Re-index now">⟳ Refresh</button>
+          <button id="settings-badge" class="topbar-btn" title="Settings">⚙️</button>
         </header>
 
         <div id="search-panel" class="panel">
+          <div id="app-update-banner" class="update-banner hidden">
+            <span class="update-banner-text">⬇ A new version of Second Brain Hub is available.</span>
+            <button id="app-update-btn" class="topbar-btn">Update &amp; Restart</button>
+          </div>
           <div class="search-row">
             <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
             <p class="hint muted">Double-click a result to open the file.</p>
@@ -128,6 +146,29 @@
         </div>
         <div class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b> &middot; double-click to <b>open it</b></div>
       </section>
+
+      <!-- Skills catalog: every skill in the shared vault's skills-repo,
+           newest first, searchable, one click to run in Claude Code. -->
+      <section id="skills-view" class="skills-view hidden">
+        <header class="topbar">
+          <button id="skills-back-btn" class="topbar-btn" title="Back to search">← Back</button>
+          <span class="viewer-title">Skills</span>
+        </header>
+        <div id="update-banner" class="update-banner hidden">
+          <span class="update-banner-text">✨ <strong id="update-banner-count"></strong> skill plugin(s) are behind the shared vault.</span>
+          <button id="update-banner-btn" class="topbar-btn">Update in Claude Code</button>
+        </div>
+        <div class="skills-search-row">
+          <input id="skills-search" type="text" placeholder="Search all skills…" autocomplete="off" />
+          <p class="hint muted">Type to search every skill; clear the box to see the 8 most recent.</p>
+        </div>
+        <ul id="skills-list" class="skills-list"></ul>
+      </section>
+
+      <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="spinner" aria-hidden="true"></div>
+        <span>Loading…</span>
+      </div>
     </main>
   </body>
 </html>

@@ -4,13 +4,15 @@ const { open: openDialog } = window.__TAURI__.dialog;
 const { openPath, openUrl, revealItemInDir } = window.__TAURI__.opener;
 const { check: checkForUpdate } = window.__TAURI__.updater;
 const { relaunch } = window.__TAURI__.process;
+const { getVersion } = window.__TAURI__.app;
 
 const onboarding = document.querySelector("#onboarding");
 const searchView = document.querySelector("#search-view");
 const viewerView = document.querySelector("#viewer-view");
 const mapView = document.querySelector("#map-view");
+const skillsView = document.querySelector("#skills-view");
 const onboardingError = document.querySelector("#onboarding-error");
-const doneSettingsBtn = document.querySelector("#done-settings-btn");
+const settingsBackBtn = document.querySelector("#settings-back-btn");
 const searchInput = document.querySelector("#search-input");
 const statusEl = document.querySelector("#status");
 const resultsEl = document.querySelector("#results");
@@ -33,7 +35,7 @@ function makePathSection({ label, statusEl, useBtn, browseBtn, autodetectCmd, se
     if (current) {
       statusEl.textContent = `Using: ${current}`;
       useBtn.classList.add("hidden");
-      updateDoneVisibility();
+      updateBackButtonVisibility();
       return;
     }
     detected = await invoke(autodetectCmd);
@@ -109,9 +111,9 @@ const sharedRawSection = makePathSection({
   required: false,
 });
 
-async function updateDoneVisibility() {
+async function updateBackButtonVisibility() {
   const config = await invoke("get_config");
-  doneSettingsBtn.classList.toggle("hidden", !config.vault_path);
+  settingsBackBtn.classList.toggle("hidden", !config.vault_path);
 }
 
 // --- Default app for .md files ---
@@ -157,25 +159,27 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
   openUrl("ms-settings:defaultapps").catch((e) => alert(`Couldn't open Settings:\n${e}`));
 });
 
-function showOnboarding() {
-  onboarding.classList.remove("hidden");
-  searchView.classList.add("hidden");
-  viewerView.classList.add("hidden");
-  mapView.classList.add("hidden");
+// Every top-level section toggles through this one helper instead of each
+// show*View() hand-repeating a `classList` line per sibling section.
+const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView };
+function showView(name) {
+  for (const [key, el] of Object.entries(VIEWS)) el.classList.toggle("hidden", key !== name);
+}
+
+async function showSettingsView() {
+  showView("onboarding");
   onboardingError.textContent = "";
   vaultSection.refresh();
   rawSection.refresh();
   inboxSection.refresh();
   sharedRawSection.refresh();
   refreshDefaultHandlerSection();
-  updateDoneVisibility();
+  updateBackButtonVisibility();
+  document.querySelector("#app-version-value").textContent = await getVersion();
 }
 
 function showSearchView() {
-  onboarding.classList.add("hidden");
-  searchView.classList.remove("hidden");
-  viewerView.classList.add("hidden");
-  mapView.classList.add("hidden");
+  showView("search");
   searchInput.value = "";
   resultsEl.innerHTML = "";
   emptyStateEl.textContent = "";
@@ -237,10 +241,7 @@ async function openInViewer(path, returnTo = "search") {
 }
 
 function showViewer() {
-  onboarding.classList.add("hidden");
-  searchView.classList.add("hidden");
-  viewerView.classList.remove("hidden");
-  mapView.classList.add("hidden");
+  showView("viewer");
 }
 
 // --- Vault Neural Map: force-directed graph of [[wikilink]] cross-references,
@@ -521,10 +522,7 @@ function rebuildMapSim(graphData) {
 }
 
 async function showMapView() {
-  onboarding.classList.add("hidden");
-  searchView.classList.add("hidden");
-  viewerView.classList.add("hidden");
-  mapView.classList.remove("hidden");
+  showView("map");
   const graphData = await invoke("get_vault_graph");
   rebuildMapSim(graphData);
   if (!mapState.running) {
@@ -629,6 +627,92 @@ mapCanvas.addEventListener(
   { passive: false },
 );
 
+// --- Skills catalog: every skill in the shared vault's skills-repo,
+// searchable, one click to run in Claude Code. ---
+
+const skillsList = document.querySelector("#skills-list");
+const skillsSearchInput = document.querySelector("#skills-search");
+const skillsUpdateBanner = document.querySelector("#update-banner");
+const skillsUpdateBannerCount = document.querySelector("#update-banner-count");
+const SKILLS_RECENT_COUNT = 8;
+let allSkills = [];
+
+// Subsequence match: every query char appears in order in the candidate
+// text; score = matched span length (lower = tighter match). No library
+// needed for ~150 short strings.
+function fuzzyScore(query, text) {
+  query = query.toLowerCase();
+  text = text.toLowerCase();
+  let cursor = 0,
+    first = -1,
+    last = -1;
+  for (const ch of query) {
+    const idx = text.indexOf(ch, cursor);
+    if (idx === -1) return null;
+    if (first === -1) first = idx;
+    last = idx;
+    cursor = idx + 1;
+  }
+  return last - first;
+}
+
+function renderSkillRows(rows) {
+  skillsList.innerHTML = "";
+  if (rows.length === 0) {
+    skillsList.innerHTML = '<li class="no-results">No skills match that search.</li>';
+    return;
+  }
+  for (const skill of rows) {
+    const li = document.createElement("li");
+    li.className = "skill-row";
+    li.innerHTML = `
+      <div class="skill-row-head">
+        <span class="skill-name">${escapeHtml(skill.name)}</span>
+        <button class="skill-run-btn" data-skill="${escapeHtml(skill.name)}">Run</button>
+      </div>
+      <span class="skill-plugin">${escapeHtml(skill.plugin)}</span>
+      <p class="skill-desc">${escapeHtml(skill.description)}</p>
+    `;
+    skillsList.appendChild(li);
+  }
+}
+
+function applySkillsSearch() {
+  const q = skillsSearchInput.value.trim();
+  if (!q) {
+    renderSkillRows(allSkills.slice(0, SKILLS_RECENT_COUNT));
+    return;
+  }
+  const scored = allSkills
+    .map((s) => ({ s, score: fuzzyScore(q, `${s.name} ${s.plugin} ${s.description}`) }))
+    .filter((m) => m.score !== null)
+    .sort((a, b) => a.score - b.score)
+    .map((m) => m.s);
+  renderSkillRows(scored);
+}
+
+async function showSkillsView() {
+  allSkills = await invoke("get_skills"); // already sorted newest-first
+  skillsSearchInput.value = "";
+  renderSkillRows(allSkills.slice(0, SKILLS_RECENT_COUNT));
+  showView("skills");
+  skillsSearchInput.focus();
+}
+
+skillsSearchInput.addEventListener("input", applySkillsSearch);
+
+skillsList.addEventListener("click", (e) => {
+  const btn = e.target.closest(".skill-run-btn");
+  if (btn) launchClaudeCommand(`/${btn.dataset.skill}`);
+});
+
+// Manual-refresh loading overlay — gated behind the click so it only covers
+// the window for a user-initiated reindex, not the sub-300ms background
+// reindexes a file-watcher event triggers on its own.
+const loadingOverlay = document.querySelector("#loading-overlay");
+const reindexBtn = document.querySelector("#reindex-btn");
+let awaitingManualRefresh = false;
+
 function renderStatus(status) {
   if (status.state === "indexing") {
     statusEl.textContent = "Indexing…";
@@ -636,6 +720,12 @@ function renderStatus(status) {
     statusEl.textContent = "Index error — check Logs";
   } else {
     statusEl.textContent = `${status.count} docs indexed`;
+  }
+
+  if (awaitingManualRefresh && status.state !== "indexing") {
+    awaitingManualRefresh = false;
+    loadingOverlay.classList.add("hidden");
+    reindexBtn.disabled = false;
   }
 }
 
@@ -707,24 +797,38 @@ async function refreshSharedRawBadge() {
   renderSharedRawCount(await invoke("get_shared_raw_count"));
 }
 
-const pluginDriftBadge = document.querySelector("#plugin-drift-badge");
-const pluginDriftCountNum = document.querySelector("#plugin-drift-count-num");
+const skillsBadge = document.querySelector("#skills-badge");
 let pluginDrift = [];
 
-function renderPluginDrift(drift) {
+// Always visible, always opens the Skills view — icon/tooltip and the
+// Skills-page banner are the only things that change with drift state.
+function renderSkillsBadge(drift) {
   pluginDrift = drift;
-  pluginDriftBadge.classList.toggle("hidden", drift.length === 0);
-  pluginDriftBadge.classList.toggle("count-alert", drift.length > 0);
-  pluginDriftCountNum.textContent = drift.length;
+  const isDrifted = drift.length > 0;
+  skillsBadge.textContent = isDrifted ? "✨ Skills" : "🧩 Skills";
+  const tooltip = isDrifted
+    ? `${drift.length} skill plugin(s) are behind the shared vault — update from the Skills page.`
+    : "See all skills";
+  skillsBadge.title = tooltip;
+  skillsBadge.dataset.tooltip = tooltip;
+  skillsUpdateBannerCount.textContent = drift.length;
+  skillsUpdateBanner.classList.toggle("hidden", !isDrifted);
 }
 
 async function checkPluginDrift() {
-  renderPluginDrift(await invoke("get_plugin_drift"));
+  renderSkillsBadge(await invoke("get_plugin_drift"));
 }
+
+skillsBadge.addEventListener("click", showSkillsView);
+document.querySelector("#skills-back-btn").addEventListener("click", showSearchView);
+document.querySelector("#update-banner-btn").addEventListener("click", () => {
+  launchClaudeCommand(`Update these outdated Second Brain plugins: ${pluginDrift.map((d) => d.key).join(", ")}`);
+});
 
 // --- Auto-update (checks on launch, install is user-initiated) ---
 
-const updateBadge = document.querySelector("#update-badge");
+const appUpdateBanner = document.querySelector("#app-update-banner");
+const appUpdateBtn = document.querySelector("#app-update-btn");
 let pendingUpdate = null;
 
 async function checkForAppUpdate() {
@@ -734,19 +838,19 @@ async function checkForAppUpdate() {
     console.log("[update] check failed:", e);
     return;
   }
-  if (pendingUpdate) updateBadge.classList.remove("hidden");
+  if (pendingUpdate) appUpdateBanner.classList.remove("hidden");
 }
 
-updateBadge.addEventListener("click", async () => {
-  if (!pendingUpdate || updateBadge.disabled) return;
-  updateBadge.disabled = true;
-  updateBadge.textContent = "Installing…";
+appUpdateBtn.addEventListener("click", async () => {
+  if (!pendingUpdate || appUpdateBtn.disabled) return;
+  appUpdateBtn.disabled = true;
+  appUpdateBtn.textContent = "Installing…";
   try {
     await pendingUpdate.downloadAndInstall();
     await relaunch();
   } catch (e) {
-    updateBadge.disabled = false;
-    updateBadge.textContent = "⬇ Update available";
+    appUpdateBtn.disabled = false;
+    appUpdateBtn.textContent = "Update & Restart";
     alert(`Couldn't install the update:\n${e}`);
   }
 });
@@ -762,11 +866,6 @@ function launchClaudeCommand(command) {
 
 rawBadge.addEventListener("click", () => launchClaudeCommand("/wiki-builder"));
 inboxBadge.addEventListener("click", () => launchClaudeCommand("/inbox-review"));
-
-pluginDriftBadge.addEventListener("click", () => {
-  const names = pluginDrift.map((d) => d.key);
-  launchClaudeCommand(`Update these outdated Second Brain plugins: ${names.join(", ")}`);
-});
 
 // No Claude command to run here — there's nothing the viewer can do about
 // someone else's pending files. Just open the folder so it's still useful.
@@ -785,7 +884,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (config.vault_path) {
     showSearchView();
   } else {
-    showOnboarding();
+    showSettingsView();
   }
 
   checkForAppUpdate();
@@ -811,11 +910,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (path) openInViewer(path);
   });
 
-  doneSettingsBtn.addEventListener("click", showSearchView);
+  settingsBackBtn.addEventListener("click", showSearchView);
 
-  document.querySelector("#change-vault-btn").addEventListener("click", showOnboarding);
+  document.querySelector("#settings-badge").addEventListener("click", showSettingsView);
 
   document.querySelector("#reindex-btn").addEventListener("click", () => {
+    awaitingManualRefresh = true;
+    loadingOverlay.classList.remove("hidden");
+    reindexBtn.disabled = true;
     invoke("reindex_now");
   });
 

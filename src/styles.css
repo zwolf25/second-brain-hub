@@ -19,37 +19,11 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .hidden {
   display: none !important;
-}
-
-/* Onboarding / settings */
-.onboarding {
-  max-width: 480px;
-  margin: 5vh auto 0;
-  padding: 0 1.5em 3em;
-  height: 100%;
-  overflow-y: auto;
-  text-align: center;
-}
-
-.settings-section {
-  text-align: left;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1em 1.2em;
-  margin: 1.2em 0;
-}
-
-.settings-section h2 {
-  margin: 0 0 0.4em;
-  font-size: 1em;
-}
-
-.settings-section .row {
-  justify-content: flex-start;
 }
 
 .muted {
@@ -220,11 +194,231 @@ button:hover {
   border-color: #396cd8;
 }
 
-.row {
+/* Settings & Skills views — both a header topbar + full-height scrolling
+   list, same pattern as the Map view. */
+.settings-view,
+.skills-view {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  height: 100%;
+}
+
+.settings-list,
+.skills-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.4em 1.4em 1.4em;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-group-label {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #777;
+  padding: 1.1em 0 0.4em;
+}
+
+.settings-group-label:first-child {
+  padding-top: 0.9em;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2em;
+  padding: 0.75em 0;
+  border-bottom: 1px solid #eee;
+}
+
+.setting-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+  min-width: 0;
+}
+
+.setting-row-actions {
+  display: flex;
+  align-items: center;
   gap: 0.5em;
-  margin: 1em 0;
+  flex: none;
+}
+
+.setting-label {
+  font-weight: 600;
+  font-size: 0.92em;
+}
+
+.setting-req,
+.setting-opt {
+  font-weight: 400;
+  color: #777;
+  font-size: 0.85em;
+}
+
+.setting-value {
+  font-size: 0.8em;
+  color: #777;
+  overflow-wrap: anywhere;
+}
+
+/* Skills view */
+.skills-search-row {
+  padding: 0.9em 1em 0;
+  flex: none;
+}
+
+.skills-search-row input {
+  width: 100%;
+  padding: 0.5em 0.8em;
+}
+
+.skill-row {
+  padding: 0.65em 0;
+  border-bottom: 1px solid #eee;
+}
+
+.skill-row:last-child {
+  border-bottom: none;
+}
+
+.skill-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+}
+
+.skill-name {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+
+.skill-run-btn {
+  height: 26px;
+  padding: 0 0.75em;
+  font-size: 0.8em;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  color: #396cd8;
+  font-weight: 600;
+  flex: none;
+}
+
+.skill-run-btn:hover {
+  background: #396cd8;
+  border-color: #396cd8;
+  color: #fff;
+}
+
+.skill-plugin {
+  display: block;
+  font-size: 0.76em;
+  color: #777;
+  margin-top: 0.15em;
+}
+
+.skill-desc {
+  margin: 0.3em 0 0;
+  font-size: 0.85em;
+  color: #444;
+  line-height: 1.35;
+}
+
+.no-results {
+  padding: 1.5em 0;
+  text-align: center;
+  color: #777;
+  font-size: 0.88em;
+}
+
+/* Skill-plugin-update banner (Skills page) and app-update banner (main
+   page) share this look — same alert colors as .topbar-btn.count-alert. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8em;
+  margin: 0.9em 1em 0;
+  padding: 0.6em 0.9em;
+  background: #fff3a3;
+  border: 1px solid #e0c840;
+  border-radius: 8px;
+  font-size: 0.85em;
+  flex: none;
+}
+
+.update-banner-text {
+  color: #6b5b0a;
+}
+
+/* Custom tooltip — the native `title` attribute's hover delay is too slow
+   for a quick glance, and some embedded webviews suppress it outright.
+   `title` is kept too, for accessibility. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 0.72em;
+  line-height: 1.3;
+  padding: 0.4em 0.65em;
+  border-radius: 6px;
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Loading overlay — covers the whole window during a manual refresh */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(246, 246, 246, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7em;
+  font-size: 0.85em;
+  color: #0f0f0f;
+  z-index: 30;
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid #ccc;
+  border-top-color: #396cd8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
 }
 
 /* Markdown viewer — Typora-like reading pane: single centered column,
@@ -424,8 +618,44 @@ button:hover {
   .progress-bar {
     background: #3a3a3a;
   }
-  .settings-section {
-    border-color: #3a3a3a;
+  .setting-row,
+  .skill-row {
+    border-color: #333;
+  }
+  .settings-group-label,
+  .setting-req,
+  .setting-opt,
+  .setting-value,
+  .skill-plugin,
+  .no-results {
+    color: #aaa;
+  }
+  .skill-desc {
+    color: #ccc;
+  }
+  .skill-run-btn {
+    background: #2a2a2a;
+    border-color: #444;
+  }
+  .skill-run-btn:hover {
+    background: #396cd8;
+    border-color: #396cd8;
+    color: #fff;
+  }
+  .update-banner {
+    background: #4a4420;
+    border-color: #6b5f2a;
+  }
+  .update-banner-text {
+    color: #e0d090;
+  }
+  .loading-overlay {
+    background: rgba(30, 30, 30, 0.85);
+    color: #f0f0f0;
+  }
+  .spinner {
+    border-color: #444;
+    border-top-color: #396cd8;
   }
   .topbar-btn {
     background: #2a2a2a;
