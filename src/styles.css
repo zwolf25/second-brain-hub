@@ -92,6 +92,7 @@ body {
   font-size: 0.85em;
   color: #888;
   white-space: nowrap;
+  margin-right: auto;
 }
 
 /* Shared style for every topbar control (raw/inbox badges, new-session,

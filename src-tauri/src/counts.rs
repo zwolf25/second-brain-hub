@@ -26,16 +26,21 @@ pub fn count_unprocessed_raw(raw_path: &Path) -> usize {
         .count()
 }
 
-/// Each inbox item has exactly one `*.share.md` companion note (optionally
-/// paired with a payload file) — counting those, not raw file count, avoids
-/// double-counting paired items.
+/// An inbox item is its note (`.md`, either standalone or a `*.share.md`
+/// companion) — not any payload file it's paired with, which avoids
+/// double-counting paired items without assuming every item has a payload.
 pub fn count_inbox_items(inbox_path: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(inbox_path) else {
         return 0;
     };
     entries
         .flatten()
-        .filter(|e| e.file_name().to_string_lossy().ends_with(".share.md"))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("md"))
+                .unwrap_or(false)
+        })
         .count()
 }
 
