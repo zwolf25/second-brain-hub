@@ -38,6 +38,8 @@ Status: **v1 (search) and the Raw/Inbox heads-up badges are implemented and veri
 
 **Dead CSS removed:** the old `.onboarding`/`.settings-section` narrow-card rules and the now-unused `.row` button-group class (nothing in the restructured Settings markup uses a bare `.row` div anymore) were deleted rather than left stale.
 
+**v5.2 — "Show all skills":** the default (empty-search) Skills view still renders the 8 most recent, now followed by a `.show-all-row` button ("Show all skills (N more)"). Clicking it re-renders every skill inline (no pagination) and scrolls the 9th row into view so the user can scroll and read the whole catalog. No persistence by design: `showSkillsView()` re-renders the default 8 on every entry, so leaving the page and returning reverts to the default. Typing in search still searches all skills; clearing the box returns to the collapsed default. Code: `renderSkillRows(rows, showMoreBtn)` / `renderSkillsDefault()` in `src/main.js`.
+
 ## 13. v4 — in-app markdown viewer + default `.md` handler
 
 **What it is:** double-clicking a search result now renders the file in-app (`render.rs`, `pulldown-cmark`) in a clean, centered, Typora-like reading pane — no editing, no raw-markdown/gutter chrome — instead of shelling out to the OS default app. An "Open externally" button in the viewer covers the edit case. The app can also be registered as the OS's `.md`/`.markdown` handler, so a double-click anywhere on the machine opens it, guided from a new Settings section.

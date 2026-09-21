@@ -656,7 +656,7 @@ function fuzzyScore(query, text) {
   return last - first;
 }
 
-function renderSkillRows(rows) {
+function renderSkillRows(rows, showMoreBtn = false) {
   skillsList.innerHTML = "";
   if (rows.length === 0) {
     skillsList.innerHTML = '<li class="no-results">No skills match that search.</li>';
@@ -675,12 +675,23 @@ function renderSkillRows(rows) {
     `;
     skillsList.appendChild(li);
   }
+  if (showMoreBtn) {
+    const li = document.createElement("li");
+    li.className = "show-all-row";
+    li.innerHTML = `<button class="show-all-btn">Show all skills (${allSkills.length - SKILLS_RECENT_COUNT} more)</button>`;
+    skillsList.appendChild(li);
+  }
+}
+
+// Default view: 8 most recent + "Show all" button (if there are more).
+function renderSkillsDefault() {
+  renderSkillRows(allSkills.slice(0, SKILLS_RECENT_COUNT), allSkills.length > SKILLS_RECENT_COUNT);
 }
 
 function applySkillsSearch() {
   const q = skillsSearchInput.value.trim();
   if (!q) {
-    renderSkillRows(allSkills.slice(0, SKILLS_RECENT_COUNT));
+    renderSkillsDefault();
     return;
   }
   const scored = allSkills
@@ -694,7 +705,7 @@ function applySkillsSearch() {
 async function showSkillsView() {
   allSkills = await invoke("get_skills"); // already sorted newest-first
   skillsSearchInput.value = "";
-  renderSkillRows(allSkills.slice(0, SKILLS_RECENT_COUNT));
+  renderSkillsDefault(); // re-entering the page always resets to the default 8
   showView("skills");
   skillsSearchInput.focus();
 }
@@ -702,6 +713,11 @@ async function showSkillsView() {
 skillsSearchInput.addEventListener("input", applySkillsSearch);
 
 skillsList.addEventListener("click", (e) => {
+  if (e.target.closest(".show-all-btn")) {
+    renderSkillRows(allSkills);
+    skillsList.children[SKILLS_RECENT_COUNT]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   const btn = e.target.closest(".skill-run-btn");
   if (btn) launchClaudeCommand(`/${btn.dataset.skill}`);
 });

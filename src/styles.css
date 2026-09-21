@@ -319,6 +319,29 @@ button:hover {
   color: #fff;
 }
 
+.show-all-row {
+  padding: 0.9em 0 0.4em;
+  text-align: center;
+}
+
+.show-all-btn {
+  padding: 0.5em 1.2em;
+  font-size: 0.88em;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  color: #396cd8;
+  font-weight: 600;
+}
+
+.show-all-btn:hover {
+  background: #396cd8;
+  border-color: #396cd8;
+  color: #fff;
+}
+
 .skill-plugin {
   display: block;
   font-size: 0.76em;
