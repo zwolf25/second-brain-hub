@@ -935,6 +935,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     loadingOverlay.classList.remove("hidden");
     reindexBtn.disabled = true;
     invoke("reindex_now");
+    invoke("refresh_plugin_drift").then(renderSkillsBadge);
   });
 
   document.querySelector("#map-btn").addEventListener("click", showMapView);

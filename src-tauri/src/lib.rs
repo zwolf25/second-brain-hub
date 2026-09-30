@@ -179,8 +179,8 @@ fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path)
     }
 }
 
-/// Checked once at launch, like `checkForAppUpdate` — plugin versions don't
-/// change mid-session, so there's no watcher here (unlike the raw/inbox counts).
+/// Checked at launch and on Refresh (`refresh_plugin_drift`) — no watcher here
+/// (unlike the raw/inbox counts).
 /// Shared vault root is the shared-raw folder's parent, since
 /// `autodetect_shared_raw` points that path at `<root>/raw`.
 fn check_plugin_drift(app: &AppHandle) {
@@ -225,6 +225,12 @@ fn set_vault_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> 
     start_watching(&app, &path);
     reindex(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn refresh_plugin_drift(app: AppHandle) -> Vec<plugins::PluginDrift> {
+    check_plugin_drift(&app);
+    app.state::<Arc<AppState>>().plugin_drift.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -501,6 +507,7 @@ pub fn run() {
             get_inbox_count,
             get_shared_raw_count,
             get_plugin_drift,
+            refresh_plugin_drift,
             get_skills,
             render_markdown,
             get_launch_file_path,
