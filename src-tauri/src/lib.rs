@@ -370,8 +370,25 @@ fn render_markdown(path: String) -> Result<render::RenderedDoc, String> {
     render::render_file(std::path::Path::new(&path)).map_err(|e| e.to_string())
 }
 
+// Any local markdown file may be edited (user decision); the Edit button is only
+// offered when the file is writable. `render::*_for_edit` enforce the .md extension.
 #[tauri::command]
-fn get_launch_file_path() -> Option<String> {
+fn can_edit_markdown(path: String) -> bool {
+    std::fs::metadata(&path).map(|m| m.is_file() && !m.permissions().readonly()).unwrap_or(false)
+}
+
+#[tauri::command]
+fn read_for_edit(path: String) -> Result<render::EditDoc, String> {
+    render::read_for_edit(std::path::Path::new(&path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_for_edit(path: String, header: String, body: String) -> Result<(), String> {
+    render::write_for_edit(std::path::Path::new(&path), &header, &body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_launch_file_path()-> Option<String> {
     PENDING_OPEN_PATH.lock().unwrap().take()
 }
 
@@ -510,6 +527,9 @@ pub fn run() {
             refresh_plugin_drift,
             get_skills,
             render_markdown,
+            can_edit_markdown,
+            read_for_edit,
+            write_for_edit,
             get_launch_file_path,
             is_default_md_handler,
             set_default_md_handler,

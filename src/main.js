@@ -1,6 +1,6 @@
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
-const { open: openDialog } = window.__TAURI__.dialog;
+const { open: openDialog, confirm: confirmDialog, message: messageDialog } = window.__TAURI__.dialog;
 const { openPath, openUrl, revealItemInDir } = window.__TAURI__.opener;
 const { check: checkForUpdate } = window.__TAURI__.updater;
 const { relaunch } = window.__TAURI__.process;
@@ -237,11 +237,73 @@ async function openInViewer(path, returnTo = "search") {
     if (src) img.src = convertFileSrc(resolveImageSrc(src, sourceDir));
   }
 
+  exitEdit();
+  viewerEditBtn.classList.toggle("hidden", !(await invoke("can_edit_markdown", { path: doc.source_path })));
   showViewer();
 }
 
 function showViewer() {
   showView("viewer");
+}
+
+// --- Source editing: plain textarea of the raw body (frontmatter held aside and
+// written back verbatim, so [[wikilinks]] and metadata round-trip untouched).
+// Explicit Save only (button or Cmd/Ctrl+S) — no autosave/undo, per v0.3.0. ---
+
+const viewerEditBtn = document.querySelector("#viewer-edit-btn");
+const viewerSaveBtn = document.querySelector("#viewer-save-btn");
+const viewerCancelBtn = document.querySelector("#viewer-cancel-btn");
+const viewerEditor = document.querySelector("#viewer-editor");
+let editHeader = "";
+let editOriginal = "";
+
+const isEditing = () => !viewerEditor.classList.contains("hidden");
+const isDirty = () => isEditing() && viewerEditor.value !== editOriginal;
+
+function exitEdit() {
+  viewerEditor.classList.add("hidden");
+  viewerContentEl.classList.remove("hidden");
+  viewerSaveBtn.classList.add("hidden");
+  viewerCancelBtn.classList.add("hidden");
+  viewerEditBtn.classList.remove("hidden");
+}
+
+async function startEdit() {
+  let doc;
+  try {
+    doc = await invoke("read_for_edit", { path: currentViewerPath });
+  } catch (e) {
+    messageDialog(`${e}`, { title: "Couldn't open for editing", kind: "error" });
+    return;
+  }
+  editHeader = doc.header;
+  editOriginal = doc.body;
+  viewerEditor.value = doc.body;
+  viewerContentEl.classList.add("hidden");
+  viewerEditor.classList.remove("hidden");
+  viewerEditBtn.classList.add("hidden");
+  viewerSaveBtn.classList.remove("hidden");
+  viewerCancelBtn.classList.remove("hidden");
+  viewerEditor.focus();
+}
+
+async function saveEdit() {
+  if (!isEditing()) return;
+  const body = viewerEditor.value;
+  try {
+    await invoke("write_for_edit", { path: currentViewerPath, header: editHeader, body });
+  } catch (e) {
+    // Keep the buffer open so nothing typed is lost (e.g. read-only wikis/ for non-owners).
+    messageDialog(`${e}`, { title: "Couldn't save", kind: "error" });
+    return;
+  }
+  await openInViewer(currentViewerPath, viewerReturnTo); // re-render; also leaves edit mode
+}
+
+// Resolves false if the user chose to keep editing. Native dialog: the webview's
+// window.confirm() is silently ignored (returns false) in Tauri.
+async function confirmLeaveEdit() {
+  return !isDirty() || confirmDialog("Discard unsaved changes?", { title: "Unsaved changes", okLabel: "Discard", cancelLabel: "Keep editing" });
 }
 
 // --- Vault Neural Map: force-directed graph of [[wikilink]] cross-references,
@@ -951,7 +1013,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     debounceTimer = setTimeout(runSearch, 200);
   });
 
-  document.querySelector("#viewer-back-btn").addEventListener("click", () => {
+  viewerEditBtn.addEventListener("click", startEdit);
+  viewerSaveBtn.addEventListener("click", saveEdit);
+  viewerCancelBtn.addEventListener("click", async () => (await confirmLeaveEdit()) && exitEdit());
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && isEditing()) {
+      e.preventDefault();
+      saveEdit();
+    }
+  });
+  document.querySelector("#viewer-back-btn").addEventListener("click", async () => {
+    if (!(await confirmLeaveEdit())) return;
+    exitEdit();
     if (viewerReturnTo === "map") showMapView();
     else showSearchView();
   });

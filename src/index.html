@@ -126,9 +126,13 @@
         <header class="topbar">
           <button id="viewer-back-btn" class="topbar-btn" title="Back to search">← Back</button>
           <span id="viewer-title" class="viewer-title"></span>
-          <button id="viewer-open-external-btn" class="topbar-btn" title="Open in your OS default app (e.g. to edit)">Open externally</button>
+          <button id="viewer-edit-btn" class="topbar-btn hidden" title="Edit this page's markdown">Edit</button>
+          <button id="viewer-save-btn" class="topbar-btn hidden" title="Save (⌘S / Ctrl+S)">Save</button>
+          <button id="viewer-cancel-btn" class="topbar-btn hidden" title="Discard changes">Cancel</button>
+          <button id="viewer-open-external-btn" class="topbar-btn" title="Open in your OS default app">Open externally</button>
         </header>
         <div id="viewer-content" class="viewer-content"></div>
+        <textarea id="viewer-editor" class="viewer-editor hidden" spellcheck="false"></textarea>
       </section>
 
       <!-- Vault Neural Map: force-directed graph of every wiki's [[wikilink]]

@@ -472,6 +472,22 @@ button:hover {
   max-width: 100%;
 }
 
+/* Source editor: plain textarea (raw markdown, wikilinks intact). */
+.viewer-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2em;
+  border: 0;
+  outline: none;
+  resize: none;
+  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: inherit;
+  background: transparent;
+}
+
+
 .viewer-content h1,
 .viewer-content h2,
 .viewer-content h3,
