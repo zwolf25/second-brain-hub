@@ -198,6 +198,7 @@
           <span class="viewer-title">Transcripts</span>
           <span id="transcripts-status" class="map-stats"></span>
           <label class="transcripts-toggle"><input id="transcripts-show-dups" type="checkbox" /> <span id="transcripts-dups-label">Suspect downloads</span></label>
+          <label class="transcripts-toggle"><input id="transcripts-show-hidden" type="checkbox" /> <span id="transcripts-hidden-label">Show hidden</span></label>
         </header>
         <div id="transcripts-empty" class="transcripts-empty hidden">
           <p>Teams transcripts, converted to markdown on your machine. Nothing is sent anywhere.</p>
@@ -210,6 +211,8 @@
           <span id="transcripts-selected"></span>
           <select id="transcripts-bulk-cat"></select>
           <button id="transcripts-bulk-apply" class="topbar-btn">Set category</button>
+          <button id="transcripts-hide-sel" class="topbar-btn">Hide</button>
+          <button id="transcripts-logit-sel" class="topbar-btn" title="Opens Claude Desktop and runs /log-it on each selected transcript (uses tokens)">Run log-it</button>
           <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
         </div>
         <p id="transcripts-privacy" class="hint muted transcripts-privacy hidden">

@@ -461,6 +461,19 @@ fn get_audit_status(app: AppHandle) -> audit::Status {
 }
 
 #[tauri::command]
+fn set_transcripts_hidden(state: State<Arc<AppState>>, vtts: Vec<String>, hidden: bool) -> Result<(), String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::set_hidden(&state.transcripts_dir, &vtts, hidden).map_err(|e| e.to_string())
+}
+
+/// Called after the log-it deep link opens; marks the transcripts logged and hides them.
+#[tauri::command]
+fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::mark_logged(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
     transcripts::rows(&state.transcripts_dir)
 }
@@ -693,6 +706,8 @@ pub fn run() {
             set_show_transcripts_page,
             rescan_transcripts,
             get_transcripts,
+            set_transcripts_hidden,
+            mark_transcripts_logged,
             get_transcript_categories,
             set_transcript_category,
             get_audit_status,

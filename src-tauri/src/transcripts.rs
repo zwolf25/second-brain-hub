@@ -195,6 +195,14 @@ pub struct Entry {
     pub duration_min: u32,
     #[serde(default)]
     pub words: u32,
+    /// Off the default list (files untouched, still indexed). `hidden_reason` is "manual" or "logged".
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub hidden_reason: Option<String>,
+    /// Sent to log-it. Set optimistically at launch (a deep link can't confirm completion).
+    #[serde(default)]
+    pub logged: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -343,6 +351,7 @@ fn process_one(path: &Path, name: &str, mtime: u64, rules: &Rules, state: &State
         speakers,
         duration_min: cues.iter().map(|c| c.end_secs).max().unwrap_or(0).div_ceil(60),
         words,
+        ..Default::default()
     })
 }
 
@@ -410,6 +419,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                 // Changed source: keep md_path so the same file is rewritten, but force reconversion below.
                 if let Some(old) = state.entries.get(&name) {
                     entry.md_path = old.md_path.clone();
+                    (entry.hidden, entry.hidden_reason, entry.logged) = (old.hidden, old.hidden_reason.clone(), old.logged);
                     reconvert.insert(name.clone());
                 }
                 if entry.category == "Other" && entry.category_source == "fallback" {
@@ -473,6 +483,28 @@ pub fn set_category(out: &Path, vtts: &[String], category: &str) -> Result<Vec<C
     Ok(changes)
 }
 
+/// Hide or unhide. Unhiding a logged transcript clears `logged` so it is eligible for log-it again.
+pub fn set_hidden(out: &Path, vtts: &[String], hidden: bool) -> Result<()> {
+    let mut state = load_state(out);
+    for e in state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).map(|(_, e)| e) {
+        e.hidden = hidden;
+        e.hidden_reason = hidden.then(|| "manual".to_string());
+        if !hidden {
+            e.logged = false;
+        }
+    }
+    save_state(out, &state)
+}
+
+/// Marks transcripts as sent to log-it and auto-hides them ("Logged" under Show hidden).
+pub fn mark_logged(out: &Path, vtts: &[String]) -> Result<()> {
+    let mut state = load_state(out);
+    for e in state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).map(|(_, e)| e) {
+        (e.logged, e.hidden, e.hidden_reason) = (true, true, Some("logged".into()));
+    }
+    save_state(out, &state)
+}
+
 /// What the Transcripts page shows per row.
 #[derive(Debug, Serialize)]
 pub struct Row {
@@ -490,6 +522,8 @@ pub struct Row {
     pub open_path: Option<String>,
     /// False when the `.md` was deleted or moved outside the Hub; the UI says so instead of erroring.
     pub md_exists: bool,
+    pub hidden: bool,
+    pub hidden_reason: Option<String>,
 }
 
 pub fn rows(out: &Path) -> Vec<Row> {
@@ -515,6 +549,8 @@ pub fn rows(out: &Path) -> Vec<Row> {
                 words: e.words,
                 duplicate_of: e.duplicate_of.clone(),
                 open_path: open,
+                hidden: e.hidden,
+                hidden_reason: e.hidden_reason.clone(),
             }
         })
         .collect();
@@ -628,6 +664,32 @@ mod tests {
         let st = load_state(&d);
         assert_eq!(st.entries["a.vtt"].category, "PD / Strat Meetings");
         assert_eq!(st.overrides["x"], "PD / Strat Meetings");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn hide_and_logged_survive_rescan_and_unhide_requeues() {
+        let d = std::env::temp_dir().join(format!("tr-hide-{}", std::process::id()));
+        let (src, out) = (d.join("src"), d.join("out"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("A Meeting-20260101_100000-Meeting Recording.vtt"), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>hello there</v>\n").unwrap();
+        let rules = Rules::embedded();
+        scan(&src, &out, &rules).unwrap();
+        let v = vec![load_state(&out).entries.keys().next().unwrap().clone()];
+        mark_logged(&out, &v).unwrap();
+        let e = &load_state(&out).entries[&v[0]];
+        assert!(e.logged && e.hidden && e.hidden_reason.as_deref() == Some("logged"));
+        // source changes: flags must survive reprocessing
+        std::fs::write(src.join(&v[0]), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>hello again</v>\n").unwrap();
+        let bumped = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(src.join(&v[0])).unwrap().set_modified(bumped).unwrap();
+        scan(&src, &out, &rules).unwrap();
+        assert!(load_state(&out).entries[&v[0]].logged);
+        set_hidden(&out, &v, false).unwrap();
+        let e = &load_state(&out).entries[&v[0]];
+        assert!(!e.hidden && !e.logged);
+        set_hidden(&out, &v, true).unwrap();
+        assert_eq!(load_state(&out).entries[&v[0]].hidden_reason.as_deref(), Some("manual"));
         std::fs::remove_dir_all(&d).ok();
     }
 

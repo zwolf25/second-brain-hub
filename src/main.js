@@ -241,6 +241,7 @@ const transcriptsEmpty = document.querySelector("#transcripts-empty");
 const transcriptsStatus = document.querySelector("#transcripts-status");
 const transcriptsShowDups = document.querySelector("#transcripts-show-dups");
 const transcriptsDupsLabel = document.querySelector("#transcripts-dups-label");
+const transcriptsShowHidden = document.querySelector("#transcripts-show-hidden");
 const transcriptsNotNowBtn = document.querySelector("#transcripts-notnow-btn");
 let transcriptRows = [];
 let transcriptsNoticeTimer = null;
@@ -273,12 +274,17 @@ function renderSelectionBar() {
 function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
   const dups = transcriptRows.filter((r) => r.duplicate_of);
-  const shown = transcriptsShowDups.checked ? transcriptRows : transcriptRows.filter((r) => !r.duplicate_of);
+  const hiddenCount = transcriptRows.filter((r) => r.hidden && !r.duplicate_of).length;
+  document.querySelector("#transcripts-hidden-label").textContent = `Show hidden (${hiddenCount})`;
+  const shown = transcriptRows.filter(
+    (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of),
+  );
+  const unhideBtn = transcriptsShowHidden.checked;
   // Identical content on a later date means Teams saved the wrong transcript, so the real one is missing.
   const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
   transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
   transcriptsStatus.textContent =
-    `${transcriptRows.length - dups.length} transcripts` +
+    `${transcriptRows.length - dups.length - hiddenCount} transcripts` +
     (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "") +
     (auditStatus.stuck_days >= 3 ? ` · ⚠ category log not reaching the shared drive for ${auditStatus.stuck_days} days` : "");
   const labelOf = (vtt) => {
@@ -297,8 +303,10 @@ function renderTranscripts() {
       <div class="transcript-head">
         <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
         <span class="skill-name">${escapeHtml(r.title)}</span>
+        ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
         <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
+        ${unhideBtn && r.hidden && !r.duplicate_of ? '<button class="t-unhide topbar-btn">Unhide</button>' : ""}
       </div>
       <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · identical to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
     `;
@@ -314,7 +322,7 @@ async function loadTranscripts() {
   transcriptsEmpty.classList.toggle("hidden", configured);
   transcriptsList.classList.toggle("hidden", !configured);
   transcriptsNotNowBtn.classList.toggle("hidden", !!config.transcripts_dismissed);
-  document.querySelector(".transcripts-toggle").classList.toggle("hidden", !configured);
+  document.querySelectorAll(".transcripts-toggle").forEach((el) => el.classList.toggle("hidden", !configured));
   if (!configured) {
     transcriptsStatus.textContent = "";
     transcriptsBar.classList.add("hidden");
@@ -354,6 +362,41 @@ document.querySelector("#transcripts-bulk-apply").addEventListener("click", asyn
   const vtts = [...selectedTranscripts];
   selectedTranscripts.clear();
   await applyCategory(vtts, bulkCatSelect.value);
+});
+transcriptsList.addEventListener("click", async (e) => {
+  const li = e.target.matches(".t-unhide") && e.target.closest(".transcript-row");
+  if (!li) return;
+  await invoke("set_transcripts_hidden", { vtts: [li.dataset.vtt], hidden: false });
+  await loadTranscripts();
+});
+document.querySelector("#transcripts-hide-sel").addEventListener("click", async () => {
+  const vtts = [...selectedTranscripts];
+  selectedTranscripts.clear();
+  await invoke("set_transcripts_hidden", { vtts, hidden: true });
+  await loadTranscripts();
+});
+// One launch per click, capped so the deep-link URL stays short. Duplicates and
+// not-yet-converted rows are skipped. Marked logged (and hidden) optimistically:
+// the deep link cannot confirm completion; Unhide makes a transcript eligible again.
+const LOGIT_MAX = 10;
+document.querySelector("#transcripts-logit-sel").addEventListener("click", async () => {
+  const rows = transcriptRows.filter((r) => selectedTranscripts.has(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
+  if (!rows.length) return transcriptsNotice("Nothing to log: select converted, non-duplicate transcripts.");
+  const batch = rows.slice(0, LOGIT_MAX);
+  const files = batch.map((r) => r.open_path);
+  const prompt =
+    files.length === 1
+      ? `/log-it ${files[0]}`
+      : `Run /log-it in file-argument mode on each of these transcript files, one after another:\n${files.join("\n")}`;
+  try {
+    await openUrl(`claude://code/new?q=${encodeURIComponent(prompt)}`);
+  } catch (err) {
+    return messageDialog(`Couldn't open Claude Desktop:\n${err}`, { title: "Run log-it", kind: "error" });
+  }
+  batch.forEach((r) => selectedTranscripts.delete(r.vtt));
+  await invoke("mark_transcripts_logged", { vtts: batch.map((r) => r.vtt) });
+  await loadTranscripts();
+  transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to log-it; select the rest and run again.` : `Sent ${batch.length} to log-it.`);
 });
 document.querySelector("#transcripts-clear-sel").addEventListener("click", () => {
   selectedTranscripts.clear();
@@ -396,6 +439,7 @@ transcriptsList.addEventListener("keydown", (e) => {
   if (li) openTranscript(li.dataset.vtt);
 });
 transcriptsShowDups.addEventListener("change", renderTranscripts);
+transcriptsShowHidden.addEventListener("change", renderTranscripts);
 
 document.querySelector("#transcripts-setup-btn").addEventListener("click", async () => {
   const found = await invoke("autodetect_transcripts");
