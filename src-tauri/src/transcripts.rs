@@ -607,6 +607,30 @@ mod tests {
         assert_eq!((third.processed, third.converted), (1, 1));
     }
 
+    #[test]
+    fn suspect_download_heals_when_the_real_transcript_arrives() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, out) = (tmp.path().join("src"), tmp.path().join("out"));
+        std::fs::create_dir(&src).unwrap();
+        let (first, second) = ("Weekly_2026-09-03_Transcript.vtt", "Weekly_2026-09-10_Transcript.vtt");
+        std::fs::write(src.join(first), vtt("A", "week one")).unwrap();
+        std::fs::write(src.join(second), vtt("A", "week one")).unwrap(); // bad download: same content
+        let rules = Rules::embedded();
+        scan(&src, &out, &rules).unwrap();
+        assert!(rows(&out).iter().find(|r| r.vtt == second).unwrap().duplicate_of.is_some());
+
+        // IT fixes the route; the real transcript replaces the file (newer mtime).
+        std::fs::write(src.join(second), vtt("A", "week two, real content")).unwrap();
+        let bumped = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(src.join(second)).unwrap().set_modified(bumped).unwrap();
+
+        let r = scan(&src, &out, &rules).unwrap();
+        assert_eq!((r.processed, r.converted), (1, 1));
+        let healed = rows(&out).into_iter().find(|r| r.vtt == second).unwrap();
+        assert!(healed.duplicate_of.is_none() && healed.md_exists, "now a normal, converted transcript");
+        assert!(std::fs::read_to_string(healed.open_path.unwrap()).unwrap().contains("week two, real content"));
+    }
+
     /// Manual check against a real folder: `TRANSCRIPTS_SRC=... cargo test real_folder -- --ignored --nocapture`.
     #[test]
     #[ignore]

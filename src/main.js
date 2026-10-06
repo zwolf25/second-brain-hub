@@ -259,9 +259,15 @@ function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
   const dups = transcriptRows.filter((r) => r.duplicate_of);
   const shown = transcriptsShowDups.checked ? transcriptRows : transcriptRows.filter((r) => !r.duplicate_of);
-  transcriptsDupsLabel.textContent = `Duplicates (${dups.length})`;
-  transcriptsStatus.textContent = `${transcriptRows.length - dups.length} transcripts`;
-  const titleOf = (vtt) => transcriptRows.find((r) => r.vtt === vtt)?.title ?? vtt;
+  // Identical content on a later date means Teams saved the wrong transcript, so the real one is missing.
+  const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
+  transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
+  transcriptsStatus.textContent =
+    `${transcriptRows.length - dups.length} transcripts` + (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "");
+  const labelOf = (vtt) => {
+    const o = transcriptRows.find((r) => r.vtt === vtt);
+    return o ? `${o.title} (${o.date ?? "undated"})` : vtt;
+  };
   transcriptsList.innerHTML = "";
   for (const r of shown) {
     const li = document.createElement("li");
@@ -274,7 +280,7 @@ function renderTranscripts() {
         <span class="skill-name">${escapeHtml(r.title)}</span>
         <span class="transcript-cat${r.confidence === "low" ? " suggested" : ""}" title="${escapeHtml(r.category_source)}">${escapeHtml(r.category)}${r.confidence === "low" ? " (suggested)" : ""}</span>
       </div>
-      <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · same content as ${escapeHtml(titleOf(r.duplicate_of))}` : ""}</span>
+      <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · identical to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
     `;
     transcriptsList.appendChild(li);
   }
