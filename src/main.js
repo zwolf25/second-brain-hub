@@ -132,8 +132,19 @@ const transcriptsSection = makePathSection({
     const config = await invoke("get_config");
     stopTranscriptsBtn.classList.toggle("hidden", !config.transcripts_path);
     showTranscriptsPageBox.checked = !config.hide_transcripts_page;
+    autostartBox.checked = await invoke("get_autostart");
     applyTranscriptsNav(config);
   },
+});
+
+const autostartBox = document.querySelector("#autostart-toggle");
+autostartBox.addEventListener("change", async () => {
+  try {
+    await invoke("set_autostart", { on: autostartBox.checked });
+  } catch (e) {
+    autostartBox.checked = !autostartBox.checked;
+    messageDialog(`${e}`, { title: "Couldn't change start at login", kind: "error" });
+  }
 });
 
 stopTranscriptsBtn.addEventListener("click", async () => {

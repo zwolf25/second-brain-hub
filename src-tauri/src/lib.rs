@@ -518,6 +518,20 @@ fn preview_auto_move(state: State<Arc<AppState>>, rule: config::AutoMove) -> usi
 }
 
 #[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Start at login so the transcripts watcher keeps running. Off unless the user turns it on.
+#[tauri::command]
+fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let l = app.autolaunch();
+    (if on { l.enable() } else { l.disable() }).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
     state.move_error.lock().unwrap().clone()
 }
@@ -660,6 +674,7 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -761,6 +776,8 @@ pub fn run() {
             set_auto_move,
             preview_auto_move,
             get_move_error,
+            get_autostart,
+            set_autostart,
             mark_transcripts_logged,
             get_transcript_categories,
             set_transcript_category,
