@@ -19,14 +19,17 @@ pub struct AppConfig {
     pub transcripts_dismissed: bool,
     #[serde(default)]
     pub hide_transcripts_page: bool,
-    /// Off unless `enabled`; runs at the end of each transcripts scan.
+    /// Ordered rules run at the end of each transcripts scan; the first matching rule claims a file.
     #[serde(default)]
-    pub auto_move: AutoMove,
+    pub auto_rules: Vec<AutoRule>,
 }
 
-/// Move converted transcripts to `dest` by category. `mode` is "include" or "exclude".
+/// One automatic action on converted transcripts. Only `action: "move"` runs inside the Hub;
+/// `mode` is "include" or "exclude" over `categories`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AutoMove {
+pub struct AutoRule {
+    pub id: String,
+    pub action: String,
     pub enabled: bool,
     pub dest: Option<PathBuf>,
     pub mode: String,

@@ -512,6 +512,8 @@ pub fn mark_logged(out: &Path, vtts: &[String]) -> Result<()> {
 pub struct MoveReport {
     pub moved: usize,
     pub skipped: usize,
+    /// One message per unusable destination (missing folder), for the page banner.
+    pub errors: Vec<String>,
 }
 
 /// Moves one file into `dest`, never overwriting (`name-2.md`, `name-3.md`...). A failed copy leaves the source alone.
@@ -537,19 +539,28 @@ fn move_file(from: &Path, dest: &Path) -> Result<PathBuf> {
     Ok(to)
 }
 
-fn move_entries(out: &Path, dest: &Path, by: &str, pick: impl Fn(&str, &Entry) -> bool) -> Result<MoveReport> {
-    anyhow::ensure!(dest.is_dir(), "Destination folder is missing: {}", dest.display());
+/// `plan` names the destination for each entry to move (None = leave it). Duplicates and missing files never move.
+fn move_entries(out: &Path, by: &str, plan: impl Fn(&str, &Entry) -> Option<PathBuf>) -> Result<MoveReport> {
     let mut state = load_state(out);
     let mut report = MoveReport::default();
     for (name, e) in state.entries.iter_mut() {
         let Some(md) = e.md_path.clone().filter(|p| Path::new(p).is_file()) else { continue };
-        if e.duplicate_of.is_some() || !pick(name, e) {
+        if e.duplicate_of.is_some() {
             continue;
         }
-        if Path::new(&md).parent() == Some(dest) {
+        let Some(dest) = plan(name, e) else { continue };
+        if Path::new(&md).parent() == Some(dest.as_path()) {
             continue;
         }
-        match move_file(Path::new(&md), dest) {
+        if !dest.is_dir() {
+            let msg = format!("Destination folder is missing: {}", dest.display());
+            if !report.errors.contains(&msg) {
+                report.errors.push(msg);
+            }
+            report.skipped += 1;
+            continue;
+        }
+        match move_file(Path::new(&md), &dest) {
             Ok(to) => {
                 e.md_path = Some(to.to_string_lossy().to_string());
                 e.moved_by = Some(by.into());
@@ -566,34 +577,45 @@ fn move_entries(out: &Path, dest: &Path, by: &str, pick: impl Fn(&str, &Entry) -
     Ok(report)
 }
 
-/// Manual "Move selected": any converted, non-duplicate transcript, even one moved before.
+/// Manual move: any converted, non-duplicate transcript, even one moved before.
 pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveReport> {
-    move_entries(out, dest, "manual", |n, _| vtts.iter().any(|v| v == n))
+    anyhow::ensure!(dest.is_dir(), "Destination folder is missing: {}", dest.display());
+    move_entries(out, "manual", |n, _| vtts.iter().any(|v| v == n).then(|| dest.to_path_buf()))
 }
 
-fn auto_eligible(cfg: &crate::config::AutoMove, e: &Entry, today: u64) -> bool {
-    let listed = cfg.categories.contains(&e.category);
-    let in_scope = if cfg.mode == "exclude" { !listed } else { listed };
-    let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + cfg.after_days);
+fn rule_matches(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
+    let listed = rule.categories.contains(&e.category);
+    let in_scope = if rule.mode == "exclude" { !listed } else { listed };
+    let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + rule.after_days);
     in_scope && old_enough && e.moved_by.is_none()
 }
 
-/// Files the auto-move rule would move now (the dry-run count shown before enabling).
-pub fn auto_move_preview(out: &Path, cfg: &crate::config::AutoMove) -> usize {
+/// Index of the rule that claims `e`: the first enabled move rule that matches.
+/// `preview` treats that rule as enabled, for the dry-run on a rule not yet switched on.
+fn claiming_rule(rules: &[crate::config::AutoRule], e: &Entry, today: u64, preview: Option<usize>) -> Option<usize> {
+    rules
+        .iter()
+        .enumerate()
+        .find(|(i, r)| r.action == "move" && (r.enabled || preview == Some(*i)) && rule_matches(r, e, today))
+        .map(|(i, _)| i)
+}
+
+/// Files `rules[idx]` would move now (the dry-run count shown before saving); earlier rules win overlaps.
+pub fn auto_move_preview(out: &Path, rules: &[crate::config::AutoRule], idx: usize) -> usize {
     let today = crate::audit::days_since_epoch(&today_utc());
     load_state(out)
         .entries
         .values()
-        .filter(|e| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()) && auto_eligible(cfg, e, today))
+        .filter(|e| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()))
+        .filter(|e| claiming_rule(rules, e, today, Some(idx)) == Some(idx))
         .count()
 }
 
 /// Runs at the end of each scan. A manually moved file (`moved_by` set) is never touched again,
 /// and a later category edit never moves a file back.
-pub fn auto_move(out: &Path, cfg: &crate::config::AutoMove) -> Result<MoveReport> {
-    let dest = cfg.dest.as_deref().context("no destination folder set")?;
+pub fn auto_move(out: &Path, rules: &[crate::config::AutoRule]) -> Result<MoveReport> {
     let today = crate::audit::days_since_epoch(&today_utc());
-    move_entries(out, dest, "auto", |_, e| auto_eligible(cfg, e, today))
+    move_entries(out, "auto", |_, e| claiming_rule(rules, e, today, None).and_then(|i| rules[i].dest.clone()))
 }
 
 /// What the Transcripts page shows per row.
@@ -794,11 +816,21 @@ mod tests {
         std::fs::write(src.join(a), vtt("a", "release")).unwrap();
         std::fs::write(src.join(b), vtt("b", "kaizen")).unwrap();
         scan(&src, &out, &Rules::embedded()).unwrap();
-        let cfg = crate::config::AutoMove { enabled: true, dest: Some(dest.clone()), mode: "include".into(), categories: vec!["Release Meetings".into()], after_days: 0 };
-        assert!(auto_move(&out, &cfg).is_err(), "missing destination must fail, never delete");
+        let rule = |id: &str, dest: &Path, mode: &str, cats: &[&str]| crate::config::AutoRule {
+            id: id.into(),
+            action: "move".into(),
+            enabled: true,
+            dest: Some(dest.to_path_buf()),
+            mode: mode.into(),
+            categories: cats.iter().map(|c| c.to_string()).collect(),
+            after_days: 0,
+        };
+        let cfg = vec![rule("r", &dest, "include", &["Release Meetings"])];
+        let r = auto_move(&out, &cfg).unwrap();
+        assert_eq!((r.moved, r.errors.len()), (0, 1), "missing destination reports and never deletes");
         assert!(load_state(&out).entries[a].md_path.as_deref().is_some_and(|p| Path::new(p).is_file()));
         std::fs::create_dir_all(&dest).unwrap();
-        assert_eq!(auto_move_preview(&out, &cfg), 1);
+        assert_eq!(auto_move_preview(&out, &cfg, 0), 1);
         assert_eq!(auto_move(&out, &cfg).unwrap().moved, 1);
         let st = load_state(&out);
         assert!(st.entries[a].md_path.as_deref().unwrap().starts_with(dest.to_str().unwrap()));
@@ -808,8 +840,19 @@ mod tests {
         let manual = d.join("manual");
         std::fs::create_dir_all(&manual).unwrap();
         assert_eq!(move_selected(&out, &[b.to_string()], &manual).unwrap().moved, 1);
-        let ex = crate::config::AutoMove { mode: "exclude".into(), categories: vec![], ..cfg.clone() };
-        assert_eq!(auto_move_preview(&out, &ex), 0);
+        let ex = vec![rule("x", &dest, "exclude", &[])];
+        assert_eq!(auto_move_preview(&out, &ex, 0), 0);
+        // two rules, two folders; the first match wins an overlap
+        let (d1, d2) = (d.join("d1"), d.join("d2"));
+        std::fs::create_dir_all(&d1).unwrap();
+        std::fs::create_dir_all(&d2).unwrap();
+        let c = std::fs::read_to_string(src.join(b)).unwrap();
+        std::fs::write(src.join("Kaizen Two-20260103_100000-Meeting Recording.vtt"), c.replace("kaizen b", "kaizen z")).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let two = vec![rule("k", &d1, "include", &["Kaizen Meetings"]), rule("all", &d2, "exclude", &[])];
+        assert_eq!(auto_move_preview(&out, &two, 1), 0, "kaizen already claimed by rule 1");
+        assert_eq!(auto_move(&out, &two).unwrap().moved, 1);
+        assert!(d1.read_dir().unwrap().count() == 1 && d2.read_dir().unwrap().count() == 0);
         // name collision gets a suffix, never an overwrite
         std::fs::write(dest.join("Kaizen Review-20260102_100000-Meeting Recording.md"), "other").unwrap();
         move_selected(&out, &[b.to_string()], &dest).unwrap();

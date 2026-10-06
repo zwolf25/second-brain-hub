@@ -133,6 +133,9 @@ const transcriptsSection = makePathSection({
     stopTranscriptsBtn.classList.toggle("hidden", !config.transcripts_path);
     showTranscriptsPageBox.checked = !config.hide_transcripts_page;
     autostartBox.checked = await invoke("get_autostart");
+    autoRules = config.auto_rules ?? [];
+    renderAutoRules();
+    document.querySelector("#add-rule-btn").disabled = !config.transcripts_path;
     applyTranscriptsNav(config);
   },
 });
@@ -290,7 +293,6 @@ function renderTranscripts() {
   const shown = transcriptRows.filter(
     (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of),
   );
-  const unhideBtn = transcriptsShowHidden.checked;
   // Identical content on a later date means Teams saved the wrong transcript, so the real one is missing.
   const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
   transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
@@ -318,7 +320,7 @@ function renderTranscripts() {
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
         <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
-        ${unhideBtn && r.hidden && !r.duplicate_of ? '<button class="t-unhide topbar-btn">Unhide</button>' : ""}
+        <button class="t-actions topbar-btn" aria-label="Actions" aria-haspopup="menu" title="Actions">⋯</button>
       </div>
       <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · identical to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
     `;
@@ -339,7 +341,6 @@ async function loadTranscripts() {
     transcriptsStatus.textContent = "";
     transcriptsBar.classList.add("hidden");
     document.querySelector("#transcripts-privacy").classList.add("hidden");
-    am.panel.classList.add("hidden");
     return;
   }
   [transcriptRows, transcriptCategories, auditStatus] = await Promise.all([
@@ -350,8 +351,7 @@ async function loadTranscripts() {
   bulkCatSelect.innerHTML = categoryOptions("");
   document.querySelector("#transcripts-privacy").classList.toggle("hidden", !auditStatus.enabled);
   renderTranscripts();
-  if (!am.panel.open) loadAutoMove(config); // don't clobber a rule being edited
-  else moveError();
+  moveError();
 }
 
 async function applyCategory(vtts, category) {
@@ -381,96 +381,37 @@ document.querySelector("#transcripts-bulk-apply").addEventListener("click", asyn
 let moveErrorText = "";
 const moveError = () =>
   invoke("get_move_error").then((err) => {
-    moveErrorText = err ? ` · ⚠ Auto-move paused: ${err}` : "";
+    moveErrorText = err ? ` · ⚠ Auto rules paused: ${err}` : "";
     renderTranscripts();
   });
 
-document.querySelector("#transcripts-move-sel").addEventListener("click", async () => {
-  const vtts = [...selectedTranscripts];
+// Move / hide / log-it work on a list of transcripts, so the selection bar and the
+// per-row "⋯" menu share one code path.
+async function moveTranscripts(vtts) {
   const dest = await openDialog({ directory: true, multiple: false });
   if (!dest) return;
   try {
     const r = await invoke("move_transcripts", { vtts, dest });
-    selectedTranscripts.clear();
+    vtts.forEach((v) => selectedTranscripts.delete(v));
     await loadTranscripts();
     transcriptsNotice(`Moved ${r.moved}${r.skipped ? `, ${r.skipped} failed` : ""}. Duplicates and missing files are skipped.`);
   } catch (e) {
     messageDialog(`${e}`, { title: "Couldn't move", kind: "error" });
   }
-});
-
-// Auto-move rule: edited in a draft, previewed (dry-run count), then saved.
-const am = {
-  panel: document.querySelector("#transcripts-automove"),
-  dest: document.querySelector("#automove-dest"),
-  mode: document.querySelector("#automove-mode"),
-  days: document.querySelector("#automove-days"),
-  cats: document.querySelector("#automove-cats"),
-  preview: document.querySelector("#automove-preview"),
-  state: document.querySelector("#automove-state"),
-  destPath: null,
-};
-const amRule = (enabled) => ({
-  enabled,
-  dest: am.destPath,
-  mode: am.mode.value,
-  categories: [...am.cats.selectedOptions].map((o) => o.value),
-  after_days: Math.max(0, parseInt(am.days.value, 10) || 0),
-});
-async function refreshAutoMovePreview() {
-  const rule = amRule(true);
-  am.preview.textContent = rule.dest ? `${await invoke("preview_auto_move", { rule })} file(s) would move now.` : "Choose a folder first.";
 }
-async function loadAutoMove(config) {
-  const r = config.auto_move;
-  am.panel.classList.remove("hidden");
-  am.destPath = r.dest;
-  am.dest.textContent = r.dest ?? "no folder chosen";
-  am.mode.value = r.mode || "include";
-  am.days.value = r.after_days;
-  am.cats.innerHTML = transcriptCategories
-    .map((c) => `<option${r.categories.includes(c) ? " selected" : ""}>${escapeHtml(c)}</option>`)
-    .join("");
-  am.state.textContent = r.enabled ? "· on" : "· off";
-  refreshAutoMovePreview();
-  moveError();
-}
-document.querySelector("#automove-dest-btn").addEventListener("click", async () => {
-  const dest = await openDialog({ directory: true, multiple: false });
-  if (!dest) return;
-  am.destPath = dest;
-  am.dest.textContent = dest;
-  refreshAutoMovePreview();
-});
-[am.mode, am.days, am.cats].forEach((el) => el.addEventListener("change", refreshAutoMovePreview));
-document.querySelector("#automove-save").addEventListener("click", async () => {
-  if (!am.destPath) return refreshAutoMovePreview();
-  await invoke("set_auto_move", { rule: amRule(true) });
-  am.state.textContent = "· on";
-});
-document.querySelector("#automove-off").addEventListener("click", async () => {
-  await invoke("set_auto_move", { rule: amRule(false) });
-  am.state.textContent = "· off";
-});
 
-transcriptsList.addEventListener("click", async (e) => {
-  const li = e.target.matches(".t-unhide") && e.target.closest(".transcript-row");
-  if (!li) return;
-  await invoke("set_transcripts_hidden", { vtts: [li.dataset.vtt], hidden: false });
+async function hideTranscripts(vtts, hidden) {
+  vtts.forEach((v) => selectedTranscripts.delete(v));
+  await invoke("set_transcripts_hidden", { vtts, hidden });
   await loadTranscripts();
-});
-document.querySelector("#transcripts-hide-sel").addEventListener("click", async () => {
-  const vtts = [...selectedTranscripts];
-  selectedTranscripts.clear();
-  await invoke("set_transcripts_hidden", { vtts, hidden: true });
-  await loadTranscripts();
-});
+}
+
 // One launch per click, capped so the deep-link URL stays short. Duplicates and
 // not-yet-converted rows are skipped. Marked logged (and hidden) optimistically:
 // the deep link cannot confirm completion; Unhide makes a transcript eligible again.
 const LOGIT_MAX = 10;
-document.querySelector("#transcripts-logit-sel").addEventListener("click", async () => {
-  const rows = transcriptRows.filter((r) => selectedTranscripts.has(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
+async function logitTranscripts(vtts) {
+  const rows = transcriptRows.filter((r) => vtts.includes(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
   if (!rows.length) return transcriptsNotice("Nothing to log: select converted, non-duplicate transcripts.");
   const batch = rows.slice(0, LOGIT_MAX);
   const files = batch.map((r) => r.open_path);
@@ -487,7 +428,149 @@ document.querySelector("#transcripts-logit-sel").addEventListener("click", async
   await invoke("mark_transcripts_logged", { vtts: batch.map((r) => r.vtt) });
   await loadTranscripts();
   transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to log-it; select the rest and run again.` : `Sent ${batch.length} to log-it.`);
+}
+
+const selectedList = () => [...selectedTranscripts];
+document.querySelector("#transcripts-move-sel").addEventListener("click", () => moveTranscripts(selectedList()));
+document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), true));
+document.querySelector("#transcripts-logit-sel").addEventListener("click", () => logitTranscripts(selectedList()));
+
+// Per-row "⋯" menu: Open, Move…, Run log-it, Hide/Unhide for that one transcript.
+const rowMenu = document.querySelector("#row-menu");
+const closeRowMenu = () => rowMenu.classList.add("hidden");
+transcriptsList.addEventListener("click", (e) => {
+  const btn = e.target.closest(".t-actions");
+  if (!btn) return;
+  e.stopPropagation();
+  const vtt = btn.closest(".transcript-row").dataset.vtt;
+  const r = transcriptRows.find((x) => x.vtt === vtt);
+  if (!r) return;
+  const items = [["open", "Open"]];
+  if (!r.duplicate_of) items.push(["move", "Move…"], ["logit", "Run log-it"], r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
+  rowMenu.innerHTML = items.map(([act, label]) => `<button role="menuitem" data-act="${act}">${label}</button>`).join("");
+  rowMenu.dataset.vtt = vtt;
+  const box = btn.getBoundingClientRect();
+  rowMenu.style.top = `${box.bottom + 4}px`;
+  rowMenu.style.left = `${Math.max(8, box.right - 150)}px`;
+  rowMenu.classList.remove("hidden");
 });
+rowMenu.addEventListener("click", (e) => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const vtt = rowMenu.dataset.vtt;
+  closeRowMenu();
+  if (act === "open") openTranscript(vtt);
+  else if (act === "move") moveTranscripts([vtt]);
+  else if (act === "logit") logitTranscripts([vtt]);
+  else hideTranscripts([vtt], act === "hide");
+});
+document.addEventListener("click", closeRowMenu);
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeRowMenu());
+
+// --- Auto rules: listed in Settings, edited in a modal. Saved as one ordered list. ---
+let autoRules = [];
+const ruleModal = document.querySelector("#rule-modal");
+const rf = {
+  dest: document.querySelector("#rule-dest"),
+  mode: document.querySelector("#rule-mode"),
+  days: document.querySelector("#rule-days"),
+  cats: document.querySelector("#rule-cats"),
+  preview: document.querySelector("#rule-preview"),
+  destPath: null,
+  editing: -1, // index in autoRules, or -1 for a new rule
+  enabled: true,
+  id: "",
+};
+const saveRules = async (rules) => {
+  await invoke("set_auto_rules", { rules });
+  autoRules = rules;
+  renderAutoRules();
+};
+const ruleFromForm = () => ({
+  id: rf.id,
+  action: "move",
+  enabled: rf.enabled,
+  dest: rf.destPath,
+  mode: rf.mode.value,
+  categories: [...rf.cats.querySelectorAll("input:checked")].map((i) => i.value),
+  after_days: Math.max(0, parseInt(rf.days.value, 10) || 0),
+});
+async function refreshRulePreview() {
+  const rule = ruleFromForm();
+  const idx = rf.editing >= 0 ? rf.editing : autoRules.length;
+  const list = rf.editing >= 0 ? autoRules.map((r, i) => (i === idx ? rule : r)) : [...autoRules, rule];
+  const n = rule.dest ? await invoke("preview_auto_rule", { rules: list, idx }) : null;
+  rf.preview.textContent = n === null ? "Choose a folder first." : `${n} existing file(s) would move when this rule is on.`;
+}
+async function openRuleModal(index) {
+  const cats = await invoke("get_transcript_categories");
+  const r = index >= 0 ? autoRules[index] : { id: crypto.randomUUID().slice(0, 8), enabled: true, dest: null, mode: "include", categories: [], after_days: 0 };
+  Object.assign(rf, { editing: index, id: r.id, enabled: r.enabled, destPath: r.dest });
+  rf.dest.textContent = r.dest ?? "no folder chosen";
+  rf.mode.value = r.mode;
+  rf.days.value = r.after_days;
+  rf.cats.innerHTML = cats
+    .map((c) => `<label><input type="checkbox" value="${escapeHtml(c)}"${r.categories.includes(c) ? " checked" : ""} /> ${escapeHtml(c)}</label>`)
+    .join("");
+  ruleModal.classList.remove("hidden");
+  refreshRulePreview();
+}
+const closeRuleModal = () => ruleModal.classList.add("hidden");
+document.querySelector("#add-rule-btn").addEventListener("click", () => openRuleModal(-1));
+document.querySelector("#rule-cancel").addEventListener("click", closeRuleModal);
+ruleModal.addEventListener("click", (e) => e.target === ruleModal && closeRuleModal());
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeRuleModal());
+document.querySelector("#rule-dest-btn").addEventListener("click", async () => {
+  const dest = await openDialog({ directory: true, multiple: false });
+  if (!dest) return;
+  rf.destPath = dest;
+  rf.dest.textContent = dest;
+  refreshRulePreview();
+});
+[rf.mode, rf.days, rf.cats].forEach((el) => el.addEventListener("change", refreshRulePreview));
+document.querySelector("#rule-save").addEventListener("click", async () => {
+  const rule = ruleFromForm();
+  if (!rule.dest) return refreshRulePreview();
+  if (!rule.categories.length && rule.mode === "include") {
+    rf.preview.textContent = "Pick at least one category.";
+    return;
+  }
+  const rules = [...autoRules];
+  if (rf.editing >= 0) rules[rf.editing] = rule;
+  else rules.push(rule);
+  await saveRules(rules);
+  closeRuleModal();
+});
+
+function renderAutoRules() {
+  const list = document.querySelector("#auto-rules-list");
+  list.innerHTML = autoRules.length ? "" : '<p class="hint muted">No rules yet.</p>';
+  autoRules.forEach((r, i) => {
+    const what = r.mode === "exclude" ? `everything except ${r.categories.join(", ") || "nothing"}` : r.categories.join(", ");
+    const row = document.createElement("div");
+    row.className = "auto-rule-row";
+    row.innerHTML = `
+      <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
+      <span class="auto-rule-text"><strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <button class="topbar-btn rule-edit">Edit</button>
+      <button class="topbar-btn rule-del">Delete</button>`;
+    row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));
+    row.querySelector(".rule-edit").addEventListener("click", () => openRuleModal(i));
+    row.querySelector(".rule-del").addEventListener("click", async () => {
+      if (await confirmDialog("Delete this rule? Files it already moved stay where they are.", { title: "Delete rule", okLabel: "Delete", cancelLabel: "Keep" })) {
+        saveRules(autoRules.filter((_, j) => j !== i));
+      }
+    });
+    list.appendChild(row);
+  });
+}
+
+// Settings hosts the rules; the Transcripts page just links there.
+document.querySelector("#transcripts-rules-btn").addEventListener("click", async () => {
+  await showSettingsView();
+  document.querySelector("#auto-rules-anchor").scrollIntoView({ block: "start" });
+});
+
 document.querySelector("#transcripts-clear-sel").addEventListener("click", () => {
   selectedTranscripts.clear();
   renderTranscripts();

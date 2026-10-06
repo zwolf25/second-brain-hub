@@ -857,3 +857,112 @@ button:hover {
     color: #aaa;
   }
 }
+
+/* Auto rules: modal, rules list, per-row action menu */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.modal {
+  background: #fff;
+  color: inherit;
+  border-radius: 10px;
+  padding: 1.2em 1.4em;
+  width: min(32em, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.modal h3 {
+  margin: 0 0 0.8em;
+}
+.modal-field {
+  display: block;
+  margin: 0.7em 0 0.3em;
+  font-size: 0.9em;
+}
+.modal-field select {
+  display: block;
+  margin-top: 0.25em;
+  max-width: 100%;
+}
+.rule-cats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.15em 0.8em;
+  max-height: 11em;
+  overflow-y: auto;
+  padding: 0.4em 0.6em;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6em;
+  margin-top: 0.8em;
+}
+.auto-rules-list {
+  list-style: none;
+  padding: 0 0 0.6em;
+}
+.auto-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.4em 0;
+  font-size: 0.88em;
+}
+.auto-rule-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.row-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 9em;
+  padding: 0.25em;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+}
+.row-menu button {
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0.45em 0.7em;
+  border-radius: 5px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.row-menu button:hover {
+  background: #eef2ff;
+}
+.t-actions {
+  padding: 0.05em 0.5em;
+  line-height: 1.2;
+}
+@media (prefers-color-scheme: dark) {
+  .modal,
+  .row-menu {
+    background: #23273a;
+    border-color: #3a3f58;
+  }
+  .rule-cats {
+    border-color: #3a3f58;
+  }
+  .row-menu button:hover {
+    background: #2a2f45;
+  }
+}

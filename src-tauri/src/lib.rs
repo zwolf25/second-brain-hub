@@ -236,16 +236,17 @@ fn scan_transcripts(app: &AppHandle) {
     let _ = app.emit("transcripts-updated", ());
 }
 
-/// Applies the auto-move rule (caller holds `transcripts_scan`). Failures are kept for the page banner and retried next scan.
+/// Applies the auto rules (caller holds `transcripts_scan`). Failures are kept for the page banner and retried next scan.
 fn run_auto_move(state: &AppState) {
-    let cfg = state.config.lock().unwrap().auto_move.clone();
-    if !cfg.enabled {
-        *state.move_error.lock().unwrap() = None;
-        return;
-    }
-    *state.move_error.lock().unwrap() = match transcripts::auto_move(&state.transcripts_dir, &cfg) {
-        Ok(r) => (r.skipped > 0).then(|| format!("{} transcript(s) could not be moved; will retry", r.skipped)),
-        Err(e) => Some(format!("{e:#}")),
+    let rules = state.config.lock().unwrap().auto_rules.clone();
+    *state.move_error.lock().unwrap() = if rules.iter().any(|r| r.enabled && r.action == "move") {
+        match transcripts::auto_move(&state.transcripts_dir, &rules) {
+            Ok(r) if !r.errors.is_empty() => Some(r.errors.join("; ")),
+            Ok(r) => (r.skipped > 0).then(|| format!("{} transcript(s) could not be moved; will retry", r.skipped)),
+            Err(e) => Some(format!("{e:#}")),
+        }
+    } else {
+        None
     };
 }
 
@@ -495,12 +496,12 @@ fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String
     transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))
 }
 
-/// Saves the rule; enabling it runs it once right away.
+/// Saves the whole ordered rule list and applies it once right away.
 #[tauri::command]
-fn set_auto_move(app: AppHandle, state: State<Arc<AppState>>, rule: config::AutoMove) -> Result<(), String> {
+fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
     {
         let mut cfg = state.config.lock().unwrap();
-        cfg.auto_move = rule;
+        cfg.auto_rules = rules;
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
     std::thread::spawn(move || {
@@ -513,8 +514,8 @@ fn set_auto_move(app: AppHandle, state: State<Arc<AppState>>, rule: config::Auto
 }
 
 #[tauri::command]
-fn preview_auto_move(state: State<Arc<AppState>>, rule: config::AutoMove) -> usize {
-    transcripts::auto_move_preview(&state.transcripts_dir, &rule)
+fn preview_auto_rule(state: State<Arc<AppState>>, rules: Vec<config::AutoRule>, idx: usize) -> usize {
+    transcripts::auto_move_preview(&state.transcripts_dir, &rules, idx)
 }
 
 #[tauri::command]
@@ -773,8 +774,8 @@ pub fn run() {
             get_transcripts,
             set_transcripts_hidden,
             move_transcripts,
-            set_auto_move,
-            preview_auto_move,
+            set_auto_rules,
+            preview_auto_rule,
             get_move_error,
             get_autostart,
             set_autostart,

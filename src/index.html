@@ -86,6 +86,14 @@
             </div>
             <input id="autostart-toggle" type="checkbox" />
           </li>
+          <li class="setting-row" id="auto-rules-anchor">
+            <div class="setting-row-main">
+              <span class="setting-label">Auto rules</span>
+              <span class="setting-value">Each rule moves converted transcripts of chosen categories to a folder after every scan. The first matching rule wins. Auto log-it and auto VoC rules are not available yet.</span>
+            </div>
+            <div class="setting-row-actions"><button id="add-rule-btn" class="topbar-btn">Add rule</button></div>
+          </li>
+          <li id="auto-rules-list" class="auto-rules-list"></li>
 
           <li class="settings-group-label">Default app</li>
           <li class="setting-row">
@@ -206,6 +214,7 @@
           <span id="transcripts-status" class="map-stats"></span>
           <label class="transcripts-toggle"><input id="transcripts-show-dups" type="checkbox" /> <span id="transcripts-dups-label">Suspect downloads</span></label>
           <label class="transcripts-toggle"><input id="transcripts-show-hidden" type="checkbox" /> <span id="transcripts-hidden-label">Show hidden</span></label>
+          <button id="transcripts-rules-btn" class="topbar-btn transcripts-toggle" title="Manage auto rules in Settings">Auto rules…</button>
         </header>
         <div id="transcripts-empty" class="transcripts-empty hidden">
           <p>Teams transcripts, converted to markdown on your machine. Nothing is sent anywhere.</p>
@@ -223,30 +232,39 @@
           <button id="transcripts-logit-sel" class="topbar-btn" title="Opens Claude Desktop and runs /log-it on each selected transcript (uses tokens)">Run log-it</button>
           <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
         </div>
-        <details id="transcripts-automove" class="transcripts-automove hidden">
-          <summary>Auto-move <span id="automove-state" class="muted"></span></summary>
-          <p class="hint muted">Moves converted markdown files to a folder after each scan, by category. Duplicates and files you moved yourself are never auto-moved. Nothing is deleted; a missing folder pauses it until the next scan.</p>
-          <p>
-            <button id="automove-dest-btn" class="topbar-btn">Choose folder…</button>
-            <span id="automove-dest" class="muted"></span>
-          </p>
-          <p>
-            <select id="automove-mode"><option value="include">Only these categories</option><option value="exclude">All except these categories</option></select>
-            After <input id="automove-days" type="number" min="0" value="0" style="width:4em" /> days (0 = right away)
-          </p>
-          <p><select id="automove-cats" multiple size="6"></select></p>
-          <p>
-            <span id="automove-preview" class="muted"></span>
-            <button id="automove-save" class="topbar-btn">Turn on</button>
-            <button id="automove-off" class="topbar-btn">Turn off</button>
-          </p>
-        </details>
         <p id="transcripts-privacy" class="hint muted transcripts-privacy hidden">
           Fixing a category shares only the meeting title, day, old and new category, and size buckets with the team owner to improve the rules — never transcript text or names.
           <button id="transcripts-view-shared" class="linklike">View what's shared</button>
         </p>
         <ul id="transcripts-list" class="skills-list"></ul>
       </section>
+
+      <div id="rule-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
+        <div class="modal">
+          <h3 id="rule-modal-title">Auto rule</h3>
+          <label class="modal-field">Action
+            <select id="rule-action">
+              <option value="move">Move to a folder</option>
+              <option value="log-it" disabled>Log-it (coming soon)</option>
+              <option value="voc" disabled>Process as VoC (coming soon)</option>
+            </select>
+          </label>
+          <div class="modal-field">Destination folder
+            <div><button id="rule-dest-btn" class="topbar-btn">Choose folder…</button> <span id="rule-dest" class="muted"></span></div>
+          </div>
+          <label class="modal-field">Which transcripts
+            <select id="rule-mode"><option value="include">Only these categories</option><option value="exclude">Everything except these categories</option></select>
+          </label>
+          <div id="rule-cats" class="rule-cats"></div>
+          <label class="modal-field">Wait <input id="rule-days" type="number" min="0" value="0" style="width:4em" /> days after conversion (0 = right away)</label>
+          <p id="rule-preview" class="hint muted"></p>
+          <div class="modal-actions">
+            <button id="rule-cancel" class="topbar-btn">Cancel</button>
+            <button id="rule-save" class="topbar-btn primary">Save rule</button>
+          </div>
+        </div>
+      </div>
+      <div id="row-menu" class="row-menu hidden" role="menu"></div>
 
       <div id="loading-overlay" class="loading-overlay hidden">
         <div class="spinner" aria-hidden="true"></div>
