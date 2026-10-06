@@ -19,6 +19,9 @@ pub struct AppConfig {
     pub transcripts_dismissed: bool,
     #[serde(default)]
     pub hide_transcripts_page: bool,
+    /// Start at login is turned on once when transcripts are first set up; after that it is the user's choice.
+    #[serde(default)]
+    pub autostart_default_applied: bool,
     /// Ordered rules run at the end of each transcripts scan; the first matching rule claims a file.
     #[serde(default)]
     pub auto_rules: Vec<AutoRule>,

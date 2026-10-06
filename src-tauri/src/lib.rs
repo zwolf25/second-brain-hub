@@ -324,8 +324,25 @@ fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
     }
 }
 
+/// Start at login defaults to on, once, for anyone using transcripts (the watcher is its only purpose).
+/// Turning it off later sticks: the flag is never reset.
+fn default_autostart(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    let state = app.state::<Arc<AppState>>();
+    let mut cfg = state.config.lock().unwrap();
+    if cfg.autostart_default_applied {
+        return;
+    }
+    if app.autolaunch().enable().is_ok() {
+        let _ = sync_tray(app, true);
+        cfg.autostart_default_applied = true;
+        let _ = config::save(&state.config_dir, &cfg);
+    }
+}
+
 /// Starts the watcher and a full scan (new files since last launch) off the UI thread.
 fn begin_transcripts(app: &AppHandle, path: &std::path::Path) {
+    default_autostart(app);
     start_watching_transcripts(app, path);
     let app = app.clone();
     std::thread::spawn(move || scan_transcripts(&app));
