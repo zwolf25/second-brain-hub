@@ -89,7 +89,7 @@
           <li class="setting-row" id="auto-rules-anchor">
             <div class="setting-row-main">
               <span class="setting-label">Auto rules</span>
-              <span class="setting-value">Each rule moves converted transcripts of chosen categories to a folder after every scan. The first matching rule wins. Auto log-it and auto VoC rules are not available yet.</span>
+              <span class="setting-value">A rule either moves converted transcripts of chosen categories to a folder after every scan (first matching move rule wins), or queues them for log-it, which the transcript-log skill runs on a schedule. Auto VoC rules are not available yet.</span>
             </div>
             <div class="setting-row-actions"><button id="add-rule-btn" class="topbar-btn">Add rule</button></div>
           </li>
@@ -245,11 +245,11 @@
           <label class="modal-field">Action
             <select id="rule-action">
               <option value="move">Move to a folder</option>
-              <option value="log-it" disabled>Log-it (coming soon)</option>
+              <option value="log-it">Log-it (queued for the transcript-log skill)</option>
               <option value="voc" disabled>Process as VoC (coming soon)</option>
             </select>
           </label>
-          <div class="modal-field">Destination folder
+          <div id="rule-dest-field" class="modal-field">Destination folder
             <div><button id="rule-dest-btn" class="topbar-btn">Choose folder…</button> <span id="rule-dest" class="muted"></span></div>
           </div>
           <label class="modal-field">Which transcripts

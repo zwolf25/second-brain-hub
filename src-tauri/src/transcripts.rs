@@ -583,11 +583,11 @@ pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveRep
     move_entries(out, "manual", |n, _| vtts.iter().any(|v| v == n).then(|| dest.to_path_buf()))
 }
 
-fn rule_matches(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
+fn in_scope(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
     let listed = rule.categories.contains(&e.category);
     let in_scope = if rule.mode == "exclude" { !listed } else { listed };
     let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + rule.after_days);
-    in_scope && old_enough && e.moved_by.is_none()
+    in_scope && old_enough
 }
 
 /// Index of the rule that claims `e`: the first enabled move rule that matches.
@@ -596,18 +596,19 @@ fn claiming_rule(rules: &[crate::config::AutoRule], e: &Entry, today: u64, previ
     rules
         .iter()
         .enumerate()
-        .find(|(i, r)| r.action == "move" && (r.enabled || preview == Some(*i)) && rule_matches(r, e, today))
+        .find(|(i, r)| r.action == "move" && (r.enabled || preview == Some(*i)) && e.moved_by.is_none() && in_scope(r, e, today))
         .map(|(i, _)| i)
 }
 
 /// Files `rules[idx]` would move now (the dry-run count shown before saving); earlier rules win overlaps.
 pub fn auto_move_preview(out: &Path, rules: &[crate::config::AutoRule], idx: usize) -> usize {
     let today = crate::audit::days_since_epoch(&today_utc());
+    let log_it = rules.get(idx).is_some_and(|r| r.action == "log-it");
     load_state(out)
         .entries
         .values()
         .filter(|e| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()))
-        .filter(|e| claiming_rule(rules, e, today, Some(idx)) == Some(idx))
+        .filter(|e| if log_it { !e.logged && !e.hidden && in_scope(&rules[idx], e, today) } else { claiming_rule(rules, e, today, Some(idx)) == Some(idx) })
         .count()
 }
 
@@ -616,6 +617,65 @@ pub fn auto_move_preview(out: &Path, rules: &[crate::config::AutoRule], idx: usi
 pub fn auto_move(out: &Path, rules: &[crate::config::AutoRule]) -> Result<MoveReport> {
     let today = crate::audit::days_since_epoch(&today_utc());
     move_entries(out, "auto", |_, e| claiming_rule(rules, e, today, None).and_then(|i| rules[i].dest.clone()))
+}
+
+/// Where the Hub and the `transcript-log` skill hand work to each other (same relative path on macOS and Windows).
+pub fn bridge_dir() -> Option<PathBuf> {
+    crate::config::dirs_home().map(|h| h.join(".claude/second-brain-hub/transcripts"))
+}
+
+#[derive(Debug, Serialize)]
+struct QueueItem<'a> {
+    vtt: &'a str,
+    path: &'a str,
+    title: &'a str,
+    date: &'a Option<String>,
+    category: &'a str,
+}
+
+/// Writes `log-queue.json`: converted, visible, not-yet-logged transcripts that an enabled log-it rule covers.
+/// The skill only reads it; all category/age filtering stays here. Returns the queue length.
+pub fn write_log_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &Path) -> Result<usize> {
+    let today = crate::audit::days_since_epoch(&today_utc());
+    let state = load_state(out);
+    let log_rules: Vec<_> = rules.iter().filter(|r| r.action == "log-it" && r.enabled).collect();
+    let items: Vec<QueueItem> = state
+        .entries
+        .iter()
+        .filter(|(_, e)| e.duplicate_of.is_none() && !e.logged && !e.hidden)
+        .filter(|(_, e)| e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()))
+        .filter(|(_, e)| log_rules.iter().any(|r| in_scope(r, e, today)))
+        .map(|(name, e)| QueueItem { vtt: name, path: e.md_path.as_deref().unwrap_or(""), title: &e.title, date: &e.date, category: &e.category })
+        .collect();
+    std::fs::create_dir_all(bridge).context("creating bridge dir")?;
+    let tmp = bridge.join("log-queue.json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&serde_json::json!({ "generated": today_utc(), "items": items }))?)?;
+    std::fs::rename(&tmp, bridge.join("log-queue.json")).context("writing log-queue.json")?;
+    Ok(items.len())
+}
+
+/// Reads receipts the skill left in `logged/*.json` (`{"vtt": ...}` each), marks those transcripts logged
+/// (which hides them), then deletes the receipts. One file per receipt, so the skill never has to edit a shared file.
+pub fn ingest_logged(out: &Path, bridge: &Path) -> Result<usize> {
+    let dir = bridge.join("logged");
+    let Ok(read) = std::fs::read_dir(&dir) else { return Ok(0) };
+    let mut vtts = Vec::new();
+    let mut done = Vec::new();
+    for f in read.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|x| x == "json")) {
+        let Some(v) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|j| j["vtt"].as_str().map(String::from)) else {
+            continue; // unreadable or half-synced: leave it for the next scan
+        };
+        vtts.push(v);
+        done.push(f);
+    }
+    if vtts.is_empty() {
+        return Ok(0);
+    }
+    mark_logged(out, &vtts)?;
+    done.iter().for_each(|f| {
+        let _ = std::fs::remove_file(f);
+    });
+    Ok(vtts.len())
 }
 
 /// What the Transcripts page shows per row.
@@ -865,6 +925,44 @@ mod tests {
         scan(&src, &out, &Rules::embedded()).unwrap();
         let p = load_state(&out).entries[a].md_path.clone().unwrap();
         assert!(p.starts_with(dest.to_str().unwrap()) && std::fs::read_to_string(&p).unwrap().contains("changed"));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn log_queue_and_receipts() {
+        let d = std::env::temp_dir().join(format!("tr-logq-{}", std::process::id()));
+        let (src, out, bridge) = (d.join("src"), d.join("out"), d.join("bridge"));
+        std::fs::create_dir_all(&src).unwrap();
+        let vtt = |b: &str| format!("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>{b}</v>\n");
+        let (a, b) = ("Weekly Release Management-20260101_100000-Meeting Recording.vtt", "Kaizen Review-20260102_100000-Meeting Recording.vtt");
+        std::fs::write(src.join(a), vtt("release")).unwrap();
+        std::fs::write(src.join(b), vtt("kaizen")).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let rule = |action: &str, cats: &[&str], enabled| crate::config::AutoRule {
+            id: "r".into(),
+            action: action.into(),
+            enabled,
+            dest: None,
+            mode: "include".into(),
+            categories: cats.iter().map(|c| c.to_string()).collect(),
+            after_days: 0,
+        };
+        assert_eq!(write_log_queue(&out, &[rule("log-it", &["Release Meetings"], false)], &bridge).unwrap(), 0, "disabled rule queues nothing");
+        let rules = [rule("log-it", &["Release Meetings", "Kaizen Meetings"], true)];
+        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 2);
+        set_hidden(&out, &[b.to_string()], true).unwrap();
+        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 1, "manually hidden stays out");
+        let q: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(bridge.join("log-queue.json")).unwrap()).unwrap();
+        assert_eq!(q["items"][0]["vtt"], a);
+        // the skill drops one receipt per success; a half-written one is left alone
+        std::fs::create_dir_all(bridge.join("logged")).unwrap();
+        std::fs::write(bridge.join("logged/1-1.json"), format!(r#"{{"vtt":"{a}"}}"#)).unwrap();
+        std::fs::write(bridge.join("logged/1-2.json"), "{half").unwrap();
+        assert_eq!(ingest_logged(&out, &bridge).unwrap(), 1);
+        let e = &load_state(&out).entries[a];
+        assert!(e.logged && e.hidden && e.hidden_reason.as_deref() == Some("logged"));
+        assert!(!bridge.join("logged/1-1.json").exists() && bridge.join("logged/1-2.json").exists());
+        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 0);
         std::fs::remove_dir_all(&d).ok();
     }
 

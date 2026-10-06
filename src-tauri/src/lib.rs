@@ -233,6 +233,7 @@ fn scan_transcripts(app: &AppHandle) {
         Err(e) => tracing::warn!("transcripts scan failed: {e:#}"),
     }
     run_auto_move(&state);
+    sync_log_bridge(&state);
     let _ = app.emit("transcripts-updated", ());
 }
 
@@ -248,6 +249,21 @@ fn run_auto_move(state: &AppState) {
     } else {
         None
     };
+}
+
+/// Hands log-it work to the `transcript-log` skill: collects its receipts first, then rewrites the queue.
+/// Caller holds `transcripts_scan`. Failures only log; the next scan retries.
+fn sync_log_bridge(state: &AppState) {
+    let Some(bridge) = transcripts::bridge_dir() else { return };
+    let rules = state.config.lock().unwrap().auto_rules.clone();
+    if let Err(e) = transcripts::ingest_logged(&state.transcripts_dir, &bridge) {
+        tracing::warn!("ingest log-it receipts: {e:#}");
+    }
+    if rules.iter().any(|r| r.action == "log-it") || bridge.join("log-queue.json").exists() {
+        if let Err(e) = transcripts::write_log_queue(&state.transcripts_dir, &rules, &bridge) {
+            tracing::warn!("write log-it queue: {e:#}");
+        }
+    }
 }
 
 fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
@@ -499,6 +515,9 @@ fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String
 /// Saves the whole ordered rule list and applies it once right away.
 #[tauri::command]
 fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
+    if let Some(bad) = rules.iter().find(|r| !["move", "log-it"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none())) {
+        return Err(format!("Rule {} is incomplete (a move rule needs a folder).", bad.id));
+    }
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.auto_rules = rules;
@@ -508,6 +527,7 @@ fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config
         let state = app.state::<Arc<AppState>>();
         let _guard = state.transcripts_scan.lock().unwrap();
         run_auto_move(&state);
+        sync_log_bridge(&state);
         let _ = app.emit("transcripts-updated", ());
     });
     Ok(())
@@ -539,6 +559,13 @@ fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
 
 #[tauri::command]
 fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
+    // Receipts from a skill run show up as soon as the page is opened, not only on the next scan.
+    {
+        let _guard = state.transcripts_scan.lock().unwrap();
+        if let Some(b) = transcripts::bridge_dir() {
+            let _ = transcripts::ingest_logged(&state.transcripts_dir, &b);
+        }
+    }
     transcripts::rows(&state.transcripts_dir)
 }
 

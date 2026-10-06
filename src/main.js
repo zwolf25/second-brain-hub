@@ -479,6 +479,8 @@ document.addEventListener("keydown", (e) => e.key === "Escape" && closeRowMenu()
 let autoRules = [];
 const ruleModal = document.querySelector("#rule-modal");
 const rf = {
+  action: document.querySelector("#rule-action"),
+  destField: document.querySelector("#rule-dest-field"),
   dest: document.querySelector("#rule-dest"),
   mode: document.querySelector("#rule-mode"),
   days: document.querySelector("#rule-days"),
@@ -496,9 +498,9 @@ const saveRules = async (rules) => {
 };
 const ruleFromForm = () => ({
   id: rf.id,
-  action: "move",
+  action: rf.action.value,
   enabled: rf.enabled,
-  dest: rf.destPath,
+  dest: rf.action.value === "move" ? rf.destPath : null,
   mode: rf.mode.value,
   categories: [...rf.cats.querySelectorAll("input:checked")].map((i) => i.value),
   after_days: Math.max(0, parseInt(rf.days.value, 10) || 0),
@@ -507,13 +509,16 @@ async function refreshRulePreview() {
   const rule = ruleFromForm();
   const idx = rf.editing >= 0 ? rf.editing : autoRules.length;
   const list = rf.editing >= 0 ? autoRules.map((r, i) => (i === idx ? rule : r)) : [...autoRules, rule];
-  const n = rule.dest ? await invoke("preview_auto_rule", { rules: list, idx }) : null;
-  rf.preview.textContent = n === null ? "Choose a folder first." : `${n} existing file(s) would move when this rule is on.`;
+  const n = rule.action === "move" && !rule.dest ? null : await invoke("preview_auto_rule", { rules: list, idx });
+  rf.preview.textContent =
+    n === null ? "Choose a folder first." : `${n} existing file(s) would ${rule.action === "move" ? "move" : "be queued for log-it"} when this rule is on.`;
 }
 async function openRuleModal(index) {
   const cats = await invoke("get_transcript_categories");
   const r = index >= 0 ? autoRules[index] : { id: crypto.randomUUID().slice(0, 8), enabled: true, dest: null, mode: "include", categories: [], after_days: 0 };
   Object.assign(rf, { editing: index, id: r.id, enabled: r.enabled, destPath: r.dest });
+  rf.action.value = r.action || "move";
+  rf.destField.classList.toggle("hidden", rf.action.value !== "move");
   rf.dest.textContent = r.dest ?? "no folder chosen";
   rf.mode.value = r.mode;
   rf.days.value = r.after_days;
@@ -535,10 +540,14 @@ document.querySelector("#rule-dest-btn").addEventListener("click", async () => {
   rf.dest.textContent = dest;
   refreshRulePreview();
 });
+rf.action.addEventListener("change", () => {
+  rf.destField.classList.toggle("hidden", rf.action.value !== "move");
+  refreshRulePreview();
+});
 [rf.mode, rf.days, rf.cats].forEach((el) => el.addEventListener("change", refreshRulePreview));
 document.querySelector("#rule-save").addEventListener("click", async () => {
   const rule = ruleFromForm();
-  if (!rule.dest) return refreshRulePreview();
+  if (rule.action === "move" && !rule.dest) return refreshRulePreview();
   if (!rule.categories.length && rule.mode === "include") {
     rf.preview.textContent = "Pick at least one category.";
     return;
@@ -559,7 +568,7 @@ function renderAutoRules() {
     row.className = "auto-rule-row";
     row.innerHTML = `
       <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
-      <span class="auto-rule-text"><strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <span class="auto-rule-text">${r.action === "log-it" ? `<strong>Log-it</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
       <button class="topbar-btn rule-edit">Edit</button>
       <button class="topbar-btn rule-del">Delete</button>`;
     row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));
