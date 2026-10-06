@@ -967,15 +967,29 @@ button:hover {
   }
 }
 
-/* Transcripts header: the status line wraps onto its own row instead of squeezing the title */
+/* Transcripts header: row 1 = back, title, Auto rules; row 2 = status left, filters right */
 #transcripts-view .topbar {
   flex-wrap: wrap;
+}
+#transcripts-view .topbar::after {
+  content: "";
+  order: 5;
+  flex-basis: 100%;
+  height: 0;
 }
 #transcripts-view .viewer-title {
   flex: none;
   overflow: visible;
 }
+#transcripts-rules-btn {
+  order: 1;
+  margin-left: auto;
+}
 #transcripts-status {
   order: 10;
-  flex: 1 0 100%;
+  flex: 1;
+}
+label.transcripts-toggle {
+  order: 11;
+  margin-left: 0.8em;
 }
