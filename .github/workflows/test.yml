@@ -1,0 +1,22 @@
+name: Test
+
+# Smoke test on both platforms without publishing anything (build.yml only releases from main).
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check src/main.js
+      - run: cargo test --manifest-path src-tauri/Cargo.toml

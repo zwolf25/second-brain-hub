@@ -74,8 +74,51 @@ static PENDING_OPEN_PATH: Mutex<Option<String>> = Mutex::new(None);
 /// already-running case on every platform, and the rare late-`Opened` case
 /// on macOS). A frontend that catches both just re-renders the same doc.
 fn handle_open_file(app: &AppHandle, path: String) {
+    show_main(app);
     *PENDING_OPEN_PATH.lock().unwrap() = Some(path.clone());
     let _ = app.emit("open-file-request", path);
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = (w.show(), w.unminimize(), w.set_focus());
+    }
+}
+
+/// Tray icon only while "Start at login" is on: closing the window then hides it, so the transcripts
+/// watcher, auto rules and log queue keep running. Off: no tray, closing the window quits as before.
+fn sync_tray(app: &AppHandle, on: bool) -> tauri::Result<()> {
+    use tauri::{menu::{Menu, MenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}};
+    if !on {
+        app.remove_tray_by_id("hub");
+        return Ok(());
+    }
+    if app.tray_by_id("hub").is_some() {
+        return Ok(());
+    }
+    let menu = Menu::with_items(
+        app,
+        &[&MenuItem::with_id(app, "open", "Open Second Brain Hub", true, None::<&str>)?, &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?],
+    )?;
+    let mut b = TrayIconBuilder::with_id("hub")
+        .tooltip("Second Brain Hub")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, e| match e.id.as_ref() {
+            "open" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|t, e| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                show_main(t.app_handle());
+            }
+        });
+    if let Some(i) = app.default_window_icon() {
+        b = b.icon(i.clone());
+    }
+    b.build(app)?;
+    Ok(())
 }
 
 /// Rebuilds the tantivy index from the vault currently in config, if any is
@@ -549,7 +592,8 @@ fn get_autostart(app: AppHandle) -> bool {
 fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let l = app.autolaunch();
-    (if on { l.enable() } else { l.disable() }).map_err(|e| e.to_string())
+    (if on { l.enable() } else { l.disable() }).map_err(|e| e.to_string())?;
+    sync_tray(&app, on).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -698,17 +742,32 @@ pub fn run() {
                     handle_open_file(app, path.clone());
                 }
             }
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_focus();
-            }
+            show_main(app);
         }))
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_window_event(|w, e| {
+            use tauri_plugin_autostart::ManagerExt;
+            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                if w.label() == "main" && w.app_handle().autolaunch().is_enabled().unwrap_or(false) {
+                    api.prevent_close();
+                    let _ = w.hide();
+                }
+            }
+        })
         .setup(|app| {
             let handle = app.handle();
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                // The window starts hidden (tauri.conf.json); only a login launch (`--hidden`) keeps it that way.
+                if !std::env::args().any(|a| a == "--hidden") {
+                    show_main(handle);
+                }
+                let _ = sync_tray(handle, handle.autolaunch().is_enabled().unwrap_or(false));
+            }
             let config_dir = handle.path().app_config_dir()?;
             let data_dir = handle.path().app_data_dir()?;
             let log_dir = handle.path().app_log_dir()?.join("logs");

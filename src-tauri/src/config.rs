@@ -150,7 +150,7 @@ pub fn autodetect_shared_raw() -> Option<PathBuf> {
 }
 
 pub(crate) fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+    // Windows: USERPROFILE is the real profile; HOME is often set by Git Bash/MSYS to something else.
+    let (first, second) = if cfg!(windows) { ("USERPROFILE", "HOME") } else { ("HOME", "USERPROFILE") };
+    std::env::var_os(first).or_else(|| std::env::var_os(second)).map(PathBuf::from)
 }
