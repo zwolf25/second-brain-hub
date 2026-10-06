@@ -19,6 +19,20 @@ pub struct AppConfig {
     pub transcripts_dismissed: bool,
     #[serde(default)]
     pub hide_transcripts_page: bool,
+    /// Off unless `enabled`; runs at the end of each transcripts scan.
+    #[serde(default)]
+    pub auto_move: AutoMove,
+}
+
+/// Move converted transcripts to `dest` by category. `mode` is "include" or "exclude".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AutoMove {
+    pub enabled: bool,
+    pub dest: Option<PathBuf>,
+    pub mode: String,
+    pub categories: Vec<String>,
+    /// Only files converted at least this many days ago (0 = right away).
+    pub after_days: u64,
 }
 
 fn config_file(config_dir: &Path) -> PathBuf {

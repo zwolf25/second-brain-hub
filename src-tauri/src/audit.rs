@@ -183,7 +183,7 @@ pub fn disabled_status() -> Status {
     Status { enabled: false, user: None, pending: 0, stuck_days: 0, events_file: None }
 }
 
-fn days_since_epoch(date: &str) -> u64 {
+pub(crate) fn days_since_epoch(date: &str) -> u64 {
     let p: Vec<i64> = date.split('-').filter_map(|x| x.parse().ok()).collect();
     let [y, m, d] = p[..] else { return 0 };
     // days_from_civil

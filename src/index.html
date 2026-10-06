@@ -211,10 +211,29 @@
           <span id="transcripts-selected"></span>
           <select id="transcripts-bulk-cat"></select>
           <button id="transcripts-bulk-apply" class="topbar-btn">Set category</button>
+          <button id="transcripts-move-sel" class="topbar-btn" title="Move the converted markdown files to a folder you choose">Move…</button>
           <button id="transcripts-hide-sel" class="topbar-btn">Hide</button>
           <button id="transcripts-logit-sel" class="topbar-btn" title="Opens Claude Desktop and runs /log-it on each selected transcript (uses tokens)">Run log-it</button>
           <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
         </div>
+        <details id="transcripts-automove" class="transcripts-automove hidden">
+          <summary>Auto-move <span id="automove-state" class="muted"></span></summary>
+          <p class="hint muted">Moves converted markdown files to a folder after each scan, by category. Duplicates and files you moved yourself are never auto-moved. Nothing is deleted; a missing folder pauses it until the next scan.</p>
+          <p>
+            <button id="automove-dest-btn" class="topbar-btn">Choose folder…</button>
+            <span id="automove-dest" class="muted"></span>
+          </p>
+          <p>
+            <select id="automove-mode"><option value="include">Only these categories</option><option value="exclude">All except these categories</option></select>
+            After <input id="automove-days" type="number" min="0" value="0" style="width:4em" /> days (0 = right away)
+          </p>
+          <p><select id="automove-cats" multiple size="6"></select></p>
+          <p>
+            <span id="automove-preview" class="muted"></span>
+            <button id="automove-save" class="topbar-btn">Turn on</button>
+            <button id="automove-off" class="topbar-btn">Turn off</button>
+          </p>
+        </details>
         <p id="transcripts-privacy" class="hint muted transcripts-privacy hidden">
           Fixing a category shares only the meeting title, day, old and new category, and size buckets with the team owner to improve the rules — never transcript text or names.
           <button id="transcripts-view-shared" class="linklike">View what's shared</button>

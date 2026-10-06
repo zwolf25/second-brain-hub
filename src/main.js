@@ -286,6 +286,7 @@ function renderTranscripts() {
   transcriptsStatus.textContent =
     `${transcriptRows.length - dups.length - hiddenCount} transcripts` +
     (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "") +
+    moveErrorText +
     (auditStatus.stuck_days >= 3 ? ` · ⚠ category log not reaching the shared drive for ${auditStatus.stuck_days} days` : "");
   const labelOf = (vtt) => {
     const o = transcriptRows.find((r) => r.vtt === vtt);
@@ -327,6 +328,7 @@ async function loadTranscripts() {
     transcriptsStatus.textContent = "";
     transcriptsBar.classList.add("hidden");
     document.querySelector("#transcripts-privacy").classList.add("hidden");
+    am.panel.classList.add("hidden");
     return;
   }
   [transcriptRows, transcriptCategories, auditStatus] = await Promise.all([
@@ -337,6 +339,8 @@ async function loadTranscripts() {
   bulkCatSelect.innerHTML = categoryOptions("");
   document.querySelector("#transcripts-privacy").classList.toggle("hidden", !auditStatus.enabled);
   renderTranscripts();
+  if (!am.panel.open) loadAutoMove(config); // don't clobber a rule being edited
+  else moveError();
 }
 
 async function applyCategory(vtts, category) {
@@ -363,6 +367,81 @@ document.querySelector("#transcripts-bulk-apply").addEventListener("click", asyn
   selectedTranscripts.clear();
   await applyCategory(vtts, bulkCatSelect.value);
 });
+let moveErrorText = "";
+const moveError = () =>
+  invoke("get_move_error").then((err) => {
+    moveErrorText = err ? ` · ⚠ Auto-move paused: ${err}` : "";
+    renderTranscripts();
+  });
+
+document.querySelector("#transcripts-move-sel").addEventListener("click", async () => {
+  const vtts = [...selectedTranscripts];
+  const dest = await openDialog({ directory: true, multiple: false });
+  if (!dest) return;
+  try {
+    const r = await invoke("move_transcripts", { vtts, dest });
+    selectedTranscripts.clear();
+    await loadTranscripts();
+    transcriptsNotice(`Moved ${r.moved}${r.skipped ? `, ${r.skipped} failed` : ""}. Duplicates and missing files are skipped.`);
+  } catch (e) {
+    messageDialog(`${e}`, { title: "Couldn't move", kind: "error" });
+  }
+});
+
+// Auto-move rule: edited in a draft, previewed (dry-run count), then saved.
+const am = {
+  panel: document.querySelector("#transcripts-automove"),
+  dest: document.querySelector("#automove-dest"),
+  mode: document.querySelector("#automove-mode"),
+  days: document.querySelector("#automove-days"),
+  cats: document.querySelector("#automove-cats"),
+  preview: document.querySelector("#automove-preview"),
+  state: document.querySelector("#automove-state"),
+  destPath: null,
+};
+const amRule = (enabled) => ({
+  enabled,
+  dest: am.destPath,
+  mode: am.mode.value,
+  categories: [...am.cats.selectedOptions].map((o) => o.value),
+  after_days: Math.max(0, parseInt(am.days.value, 10) || 0),
+});
+async function refreshAutoMovePreview() {
+  const rule = amRule(true);
+  am.preview.textContent = rule.dest ? `${await invoke("preview_auto_move", { rule })} file(s) would move now.` : "Choose a folder first.";
+}
+async function loadAutoMove(config) {
+  const r = config.auto_move;
+  am.panel.classList.remove("hidden");
+  am.destPath = r.dest;
+  am.dest.textContent = r.dest ?? "no folder chosen";
+  am.mode.value = r.mode || "include";
+  am.days.value = r.after_days;
+  am.cats.innerHTML = transcriptCategories
+    .map((c) => `<option${r.categories.includes(c) ? " selected" : ""}>${escapeHtml(c)}</option>`)
+    .join("");
+  am.state.textContent = r.enabled ? "· on" : "· off";
+  refreshAutoMovePreview();
+  moveError();
+}
+document.querySelector("#automove-dest-btn").addEventListener("click", async () => {
+  const dest = await openDialog({ directory: true, multiple: false });
+  if (!dest) return;
+  am.destPath = dest;
+  am.dest.textContent = dest;
+  refreshAutoMovePreview();
+});
+[am.mode, am.days, am.cats].forEach((el) => el.addEventListener("change", refreshAutoMovePreview));
+document.querySelector("#automove-save").addEventListener("click", async () => {
+  if (!am.destPath) return refreshAutoMovePreview();
+  await invoke("set_auto_move", { rule: amRule(true) });
+  am.state.textContent = "· on";
+});
+document.querySelector("#automove-off").addEventListener("click", async () => {
+  await invoke("set_auto_move", { rule: amRule(false) });
+  am.state.textContent = "· off";
+});
+
 transcriptsList.addEventListener("click", async (e) => {
   const li = e.target.matches(".t-unhide") && e.target.closest(".transcript-row");
   if (!li) return;

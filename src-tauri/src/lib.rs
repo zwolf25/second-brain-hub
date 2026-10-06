@@ -48,6 +48,8 @@ struct AppState {
     transcripts_dir: PathBuf,
     /// Serializes scans: the watcher callback, launch scan and manual rescan can overlap.
     transcripts_scan: Mutex<()>,
+    /// Last auto-move failure (e.g. destination missing); cleared by the next success.
+    move_error: Mutex<Option<String>>,
     status: Mutex<IndexStatus>,
     raw_count: Mutex<Option<usize>>,
     inbox_count: Mutex<Option<usize>>,
@@ -230,7 +232,21 @@ fn scan_transcripts(app: &AppHandle) {
         }
         Err(e) => tracing::warn!("transcripts scan failed: {e:#}"),
     }
+    run_auto_move(&state);
     let _ = app.emit("transcripts-updated", ());
+}
+
+/// Applies the auto-move rule (caller holds `transcripts_scan`). Failures are kept for the page banner and retried next scan.
+fn run_auto_move(state: &AppState) {
+    let cfg = state.config.lock().unwrap().auto_move.clone();
+    if !cfg.enabled {
+        *state.move_error.lock().unwrap() = None;
+        return;
+    }
+    *state.move_error.lock().unwrap() = match transcripts::auto_move(&state.transcripts_dir, &cfg) {
+        Ok(r) => (r.skipped > 0).then(|| format!("{} transcript(s) could not be moved; will retry", r.skipped)),
+        Err(e) => Some(format!("{e:#}")),
+    };
 }
 
 fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
@@ -474,6 +490,39 @@ fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Re
 }
 
 #[tauri::command]
+fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String) -> Result<transcripts::MoveReport, String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))
+}
+
+/// Saves the rule; enabling it runs it once right away.
+#[tauri::command]
+fn set_auto_move(app: AppHandle, state: State<Arc<AppState>>, rule: config::AutoMove) -> Result<(), String> {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.auto_move = rule;
+        config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
+    }
+    std::thread::spawn(move || {
+        let state = app.state::<Arc<AppState>>();
+        let _guard = state.transcripts_scan.lock().unwrap();
+        run_auto_move(&state);
+        let _ = app.emit("transcripts-updated", ());
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn preview_auto_move(state: State<Arc<AppState>>, rule: config::AutoMove) -> usize {
+    transcripts::auto_move_preview(&state.transcripts_dir, &rule)
+}
+
+#[tauri::command]
+fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
+    state.move_error.lock().unwrap().clone()
+}
+
+#[tauri::command]
 fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
     transcripts::rows(&state.transcripts_dir)
 }
@@ -639,6 +688,7 @@ pub fn run() {
                 transcripts_watcher: Mutex::new(None),
                 transcripts_dir: data_dir.join("transcripts"),
                 transcripts_scan: Mutex::new(()),
+                move_error: Mutex::new(None),
                 status: Mutex::new(IndexStatus::Idle { count: 0 }),
                 raw_count: Mutex::new(None),
                 inbox_count: Mutex::new(None),
@@ -707,6 +757,10 @@ pub fn run() {
             rescan_transcripts,
             get_transcripts,
             set_transcripts_hidden,
+            move_transcripts,
+            set_auto_move,
+            preview_auto_move,
+            get_move_error,
             mark_transcripts_logged,
             get_transcript_categories,
             set_transcript_category,

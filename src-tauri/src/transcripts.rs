@@ -203,6 +203,9 @@ pub struct Entry {
     /// Sent to log-it. Set optimistically at launch (a deep link can't confirm completion).
     #[serde(default)]
     pub logged: bool,
+    /// "manual" or "auto"; a moved file is never auto-moved again.
+    #[serde(default)]
+    pub moved_by: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -419,7 +422,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                 // Changed source: keep md_path so the same file is rewritten, but force reconversion below.
                 if let Some(old) = state.entries.get(&name) {
                     entry.md_path = old.md_path.clone();
-                    (entry.hidden, entry.hidden_reason, entry.logged) = (old.hidden, old.hidden_reason.clone(), old.logged);
+                    (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone());
                     reconvert.insert(name.clone());
                 }
                 if entry.category == "Other" && entry.category_source == "fallback" {
@@ -445,7 +448,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
         }
         let Ok(text) = std::fs::read_to_string(src.join(&name)) else { continue };
         let cues = merge_cues(parse_cues(&text));
-        let md = out.join(format!("{}.md", name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s)));
+        let md = e.md_path.as_ref().map(PathBuf::from).unwrap_or_else(|| out.join(format!("{}.md", name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s))));
         std::fs::write(&md, render(&cues, &name, &e.title, e.date.as_deref(), &converted))?;
         let e = state.entries.get_mut(&name).unwrap();
         e.md_path = Some(md.to_string_lossy().to_string());
@@ -503,6 +506,94 @@ pub fn mark_logged(out: &Path, vtts: &[String]) -> Result<()> {
         (e.logged, e.hidden, e.hidden_reason) = (true, true, Some("logged".into()));
     }
     save_state(out, &state)
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct MoveReport {
+    pub moved: usize,
+    pub skipped: usize,
+}
+
+/// Moves one file into `dest`, never overwriting (`name-2.md`, `name-3.md`...). A failed copy leaves the source alone.
+fn move_file(from: &Path, dest: &Path) -> Result<PathBuf> {
+    let stem = from.file_stem().map_or(String::new(), |s| s.to_string_lossy().to_string());
+    let ext = from.extension().map_or(String::new(), |s| format!(".{}", s.to_string_lossy()));
+    let mut to = dest.join(format!("{stem}{ext}"));
+    for n in 2.. {
+        if !to.exists() {
+            break;
+        }
+        to = dest.join(format!("{stem}-{n}{ext}"));
+    }
+    if std::fs::rename(from, &to).is_err() {
+        // Across volumes (or OneDrive): copy, verify, then remove the source.
+        let bytes = std::fs::copy(from, &to).context("copying to destination")?;
+        if bytes != std::fs::metadata(from)?.len() {
+            let _ = std::fs::remove_file(&to);
+            anyhow::bail!("copy was short; source kept");
+        }
+        std::fs::remove_file(from).context("removing source after copy")?;
+    }
+    Ok(to)
+}
+
+fn move_entries(out: &Path, dest: &Path, by: &str, pick: impl Fn(&str, &Entry) -> bool) -> Result<MoveReport> {
+    anyhow::ensure!(dest.is_dir(), "Destination folder is missing: {}", dest.display());
+    let mut state = load_state(out);
+    let mut report = MoveReport::default();
+    for (name, e) in state.entries.iter_mut() {
+        let Some(md) = e.md_path.clone().filter(|p| Path::new(p).is_file()) else { continue };
+        if e.duplicate_of.is_some() || !pick(name, e) {
+            continue;
+        }
+        if Path::new(&md).parent() == Some(dest) {
+            continue;
+        }
+        match move_file(Path::new(&md), dest) {
+            Ok(to) => {
+                e.md_path = Some(to.to_string_lossy().to_string());
+                e.moved_by = Some(by.into());
+                report.moved += 1;
+            }
+            Err(err) => {
+                tracing::warn!("move {name}: {err:#}");
+                report.skipped += 1;
+            }
+        }
+    }
+    save_state(out, &state)?;
+    write_index(out, &state)?;
+    Ok(report)
+}
+
+/// Manual "Move selected": any converted, non-duplicate transcript, even one moved before.
+pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveReport> {
+    move_entries(out, dest, "manual", |n, _| vtts.iter().any(|v| v == n))
+}
+
+fn auto_eligible(cfg: &crate::config::AutoMove, e: &Entry, today: u64) -> bool {
+    let listed = cfg.categories.contains(&e.category);
+    let in_scope = if cfg.mode == "exclude" { !listed } else { listed };
+    let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + cfg.after_days);
+    in_scope && old_enough && e.moved_by.is_none()
+}
+
+/// Files the auto-move rule would move now (the dry-run count shown before enabling).
+pub fn auto_move_preview(out: &Path, cfg: &crate::config::AutoMove) -> usize {
+    let today = crate::audit::days_since_epoch(&today_utc());
+    load_state(out)
+        .entries
+        .values()
+        .filter(|e| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()) && auto_eligible(cfg, e, today))
+        .count()
+}
+
+/// Runs at the end of each scan. A manually moved file (`moved_by` set) is never touched again,
+/// and a later category edit never moves a file back.
+pub fn auto_move(out: &Path, cfg: &crate::config::AutoMove) -> Result<MoveReport> {
+    let dest = cfg.dest.as_deref().context("no destination folder set")?;
+    let today = crate::audit::days_since_epoch(&today_utc());
+    move_entries(out, dest, "auto", |_, e| auto_eligible(cfg, e, today))
 }
 
 /// What the Transcripts page shows per row.
@@ -690,6 +781,47 @@ mod tests {
         assert!(!e.hidden && !e.logged);
         set_hidden(&out, &v, true).unwrap();
         assert_eq!(load_state(&out).entries[&v[0]].hidden_reason.as_deref(), Some("manual"));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn move_and_auto_move_rules() {
+        let d = std::env::temp_dir().join(format!("tr-move-{}", std::process::id()));
+        let (src, out, dest) = (d.join("src"), d.join("out"), d.join("dest"));
+        std::fs::create_dir_all(&src).unwrap();
+        let vtt = |t: &str, body: &str| format!("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>{body} {t}</v>\n");
+        let (a, b) = ("Weekly Release Management-20260101_100000-Meeting Recording.vtt", "Kaizen Review-20260102_100000-Meeting Recording.vtt");
+        std::fs::write(src.join(a), vtt("a", "release")).unwrap();
+        std::fs::write(src.join(b), vtt("b", "kaizen")).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let cfg = crate::config::AutoMove { enabled: true, dest: Some(dest.clone()), mode: "include".into(), categories: vec!["Release Meetings".into()], after_days: 0 };
+        assert!(auto_move(&out, &cfg).is_err(), "missing destination must fail, never delete");
+        assert!(load_state(&out).entries[a].md_path.as_deref().is_some_and(|p| Path::new(p).is_file()));
+        std::fs::create_dir_all(&dest).unwrap();
+        assert_eq!(auto_move_preview(&out, &cfg), 1);
+        assert_eq!(auto_move(&out, &cfg).unwrap().moved, 1);
+        let st = load_state(&out);
+        assert!(st.entries[a].md_path.as_deref().unwrap().starts_with(dest.to_str().unwrap()));
+        assert_eq!(st.entries[b].moved_by, None, "other category stays");
+        assert_eq!(auto_move(&out, &cfg).unwrap().moved, 0, "rerun is a no-op");
+        // exclude mode picks up everything not listed; a manual move is never re-moved by the rule
+        let manual = d.join("manual");
+        std::fs::create_dir_all(&manual).unwrap();
+        assert_eq!(move_selected(&out, &[b.to_string()], &manual).unwrap().moved, 1);
+        let ex = crate::config::AutoMove { mode: "exclude".into(), categories: vec![], ..cfg.clone() };
+        assert_eq!(auto_move_preview(&out, &ex), 0);
+        // name collision gets a suffix, never an overwrite
+        std::fs::write(dest.join("Kaizen Review-20260102_100000-Meeting Recording.md"), "other").unwrap();
+        move_selected(&out, &[b.to_string()], &dest).unwrap();
+        assert!(dest.join("Kaizen Review-20260102_100000-Meeting Recording-2.md").is_file());
+        assert_eq!(std::fs::read_to_string(dest.join("Kaizen Review-20260102_100000-Meeting Recording.md")).unwrap(), "other");
+        // changed source rewrites the moved file in place, not a stray copy in out/
+        std::fs::write(src.join(a), vtt("a", "release changed")).unwrap();
+        let bumped = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(src.join(a)).unwrap().set_modified(bumped).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let p = load_state(&out).entries[a].md_path.clone().unwrap();
+        assert!(p.starts_with(dest.to_str().unwrap()) && std::fs::read_to_string(&p).unwrap().contains("changed"));
         std::fs::remove_dir_all(&d).ok();
     }
 
