@@ -547,16 +547,18 @@ rf.action.addEventListener("change", () => {
 [rf.mode, rf.days, rf.cats].forEach((el) => el.addEventListener("change", refreshRulePreview));
 document.querySelector("#rule-save").addEventListener("click", async () => {
   const rule = ruleFromForm();
-  if (rule.action === "move" && !rule.dest) return refreshRulePreview();
-  if (!rule.categories.length && rule.mode === "include") {
-    rf.preview.textContent = "Pick at least one category.";
-    return;
-  }
+  const warn = (m) => messageDialog(m, { title: "Can't save rule", kind: "warning" });
+  if (rule.action === "move" && !rule.dest) return warn("Choose a destination folder first.");
+  if (!rule.categories.length && rule.mode === "include") return warn("Tick at least one category, or switch to \"Everything except these categories\".");
   const rules = [...autoRules];
   if (rf.editing >= 0) rules[rf.editing] = rule;
   else rules.push(rule);
-  await saveRules(rules);
-  closeRuleModal();
+  try {
+    await saveRules(rules);
+    closeRuleModal();
+  } catch (e) {
+    warn(`${e}`);
+  }
 });
 
 function renderAutoRules() {
