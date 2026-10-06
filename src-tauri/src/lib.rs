@@ -114,6 +114,12 @@ fn sync_tray(app: &AppHandle, on: bool) -> tauri::Result<()> {
                 show_main(t.app_handle());
             }
         });
+    // macOS menu bar: a black "template" icon the system tints for light/dark. Elsewhere the colored app icon.
+    #[cfg(target_os = "macos")]
+    {
+        b = b.icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?).icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(i) = app.default_window_icon() {
         b = b.icon(i.clone());
     }
