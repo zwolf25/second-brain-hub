@@ -200,6 +200,9 @@ pub struct Entry {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
     pub entries: BTreeMap<String, Entry>,
+    /// Manual per-series corrections: normalized title -> category. Applied to later occurrences.
+    #[serde(default)]
+    pub overrides: BTreeMap<String, String>,
 }
 
 fn state_file(out: &Path) -> PathBuf {
@@ -240,6 +243,9 @@ pub struct ScanReport {
     pub processed: usize,
     pub converted: usize,
     pub skipped_unreadable: usize,
+    /// Newly categorized transcripts that fell through to `Other` (feeds the review loop).
+    #[serde(skip)]
+    pub auto_other: Vec<Entry>,
 }
 
 fn vtt_files(src: &Path) -> Vec<PathBuf> {
@@ -301,7 +307,14 @@ fn process_one(path: &Path, name: &str, mtime: u64, rules: &Rules, state: &State
 
     let v = categorize::categorize(
         rules,
-        &categorize::Input { title_norm: &tn, speakers: &speakers, speaker_words: &words_by, body_lower: &body_lower, words },
+        &categorize::Input {
+            title_norm: &tn,
+            speakers: &speakers,
+            speaker_words: &words_by,
+            body_lower: &body_lower,
+            words,
+            override_category: state.overrides.get(&tn).map(String::as_str),
+        },
         &peers,
         internal,
     );
@@ -388,6 +401,9 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                     entry.md_path = old.md_path.clone();
                     reconvert.insert(name.clone());
                 }
+                if entry.category == "Other" && entry.category_source == "fallback" {
+                    report.auto_other.push(entry.clone());
+                }
                 state.entries.insert(name, entry);
                 report.processed += 1;
             }
@@ -418,6 +434,32 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
     save_state(out, &state)?;
     write_index(out, &state)?;
     Ok(report)
+}
+
+/// What a manual category change replaced, for the audit log.
+pub struct Change {
+    pub entry: Entry,
+    pub from: String,
+    pub auto_source: String,
+}
+
+/// Sets `category` on each transcript (source `manual`) and remembers it for the whole series.
+pub fn set_category(out: &Path, vtts: &[String], category: &str) -> Result<Vec<Change>> {
+    let mut state = load_state(out);
+    let mut changes = Vec::new();
+    for v in vtts {
+        let Some(e) = state.entries.get_mut(v) else { continue };
+        let (from, auto_source) = (e.category.clone(), e.category_source.clone());
+        e.category = category.to_string();
+        e.category_source = "manual".into();
+        e.confidence = "high".into();
+        let tn = title_norm(&e.title);
+        changes.push(Change { entry: e.clone(), from, auto_source });
+        state.overrides.insert(tn, category.to_string());
+    }
+    save_state(out, &state)?;
+    write_index(out, &state)?;
+    Ok(changes)
 }
 
 /// What the Transcripts page shows per row.
@@ -629,6 +671,26 @@ mod tests {
         let healed = rows(&out).into_iter().find(|r| r.vtt == second).unwrap();
         assert!(healed.duplicate_of.is_none() && healed.md_exists, "now a normal, converted transcript");
         assert!(std::fs::read_to_string(healed.open_path.unwrap()).unwrap().contains("week two, real content"));
+    }
+
+    #[test]
+    fn manual_category_sticks_to_the_series() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, out) = (tmp.path().join("src"), tmp.path().join("out"));
+        std::fs::create_dir(&src).unwrap();
+        let first = "Mystery Series_2026-09-03_Transcript.vtt";
+        std::fs::write(src.join(first), vtt("A", "one")).unwrap();
+        let rules = Rules::embedded();
+        let r = scan(&src, &out, &rules).unwrap();
+        assert_eq!(r.auto_other.len(), 1, "fallback to Other is reported for the review loop");
+
+        let ch = set_category(&out, &[first.to_string()], "Kaizen Meetings").unwrap();
+        assert_eq!((ch[0].from.as_str(), ch[0].auto_source.as_str()), ("Other", "fallback"));
+        std::fs::write(src.join("Mystery Series_2026-09-10_Transcript.vtt"), vtt("A", "two")).unwrap();
+        let r = scan(&src, &out, &rules).unwrap();
+        assert!(r.auto_other.is_empty(), "next occurrence is right without another click");
+        let next = rows(&out).into_iter().find(|r| r.vtt.contains("09-10")).unwrap();
+        assert_eq!((next.category.as_str(), next.category_source.as_str()), ("Kaizen Meetings", "manual"));
     }
 
     /// Manual check against a real folder: `TRANSCRIPTS_SRC=... cargo test real_folder -- --ignored --nocapture`.

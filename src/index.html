@@ -206,6 +206,16 @@
             <button id="transcripts-notnow-btn" class="topbar-btn">Not now</button>
           </p>
         </div>
+        <div id="transcripts-bar" class="transcripts-bar hidden">
+          <span id="transcripts-selected"></span>
+          <select id="transcripts-bulk-cat"></select>
+          <button id="transcripts-bulk-apply" class="topbar-btn">Set category</button>
+          <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
+        </div>
+        <p id="transcripts-privacy" class="hint muted transcripts-privacy hidden">
+          Fixing a category shares only the meeting title, day, old and new category, and size buckets with the team owner to improve the rules — never transcript text or names.
+          <button id="transcripts-view-shared" class="linklike">View what's shared</button>
+        </p>
         <ul id="transcripts-list" class="skills-list"></ul>
       </section>
 

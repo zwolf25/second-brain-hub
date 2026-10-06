@@ -255,6 +255,21 @@ function transcriptsNotice(text) {
   transcriptsNoticeTimer = setTimeout(renderTranscripts, 4000);
 }
 
+let transcriptCategories = [];
+let auditStatus = { enabled: false, pending: 0, stuck_days: 0 };
+const selectedTranscripts = new Set();
+const transcriptsBar = document.querySelector("#transcripts-bar");
+const bulkCatSelect = document.querySelector("#transcripts-bulk-cat");
+
+const categoryOptions = (current) =>
+  transcriptCategories.map((c) => `<option${c === current ? " selected" : ""}>${escapeHtml(c)}</option>`).join("");
+
+function renderSelectionBar() {
+  const n = selectedTranscripts.size;
+  transcriptsBar.classList.toggle("hidden", n === 0);
+  document.querySelector("#transcripts-selected").textContent = `${n} selected`;
+}
+
 function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
   const dups = transcriptRows.filter((r) => r.duplicate_of);
@@ -263,11 +278,14 @@ function renderTranscripts() {
   const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
   transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
   transcriptsStatus.textContent =
-    `${transcriptRows.length - dups.length} transcripts` + (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "");
+    `${transcriptRows.length - dups.length} transcripts` +
+    (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "") +
+    (auditStatus.stuck_days >= 3 ? ` · ⚠ category log not reaching the shared drive for ${auditStatus.stuck_days} days` : "");
   const labelOf = (vtt) => {
     const o = transcriptRows.find((r) => r.vtt === vtt);
     return o ? `${o.title} (${o.date ?? "undated"})` : vtt;
   };
+  for (const v of [...selectedTranscripts]) if (!shown.some((r) => r.vtt === v)) selectedTranscripts.delete(v);
   transcriptsList.innerHTML = "";
   for (const r of shown) {
     const li = document.createElement("li");
@@ -276,15 +294,18 @@ function renderTranscripts() {
     li.dataset.vtt = r.vtt;
     const meta = [r.date, `${r.speakers} speaker${r.speakers === 1 ? "" : "s"}`, `${r.duration_min} min`, `${r.words.toLocaleString()} words`];
     li.innerHTML = `
-      <div class="skill-row-head">
+      <div class="transcript-head">
+        <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
         <span class="skill-name">${escapeHtml(r.title)}</span>
-        <span class="transcript-cat${r.confidence === "low" ? " suggested" : ""}" title="${escapeHtml(r.category_source)}">${escapeHtml(r.category)}${r.confidence === "low" ? " (suggested)" : ""}</span>
+        ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
+        <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
       </div>
       <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · identical to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
     `;
     transcriptsList.appendChild(li);
   }
   transcriptsList.scrollTop = scroll;
+  renderSelectionBar();
 }
 
 async function loadTranscripts() {
@@ -296,11 +317,53 @@ async function loadTranscripts() {
   document.querySelector(".transcripts-toggle").classList.toggle("hidden", !configured);
   if (!configured) {
     transcriptsStatus.textContent = "";
+    transcriptsBar.classList.add("hidden");
+    document.querySelector("#transcripts-privacy").classList.add("hidden");
     return;
   }
-  transcriptRows = await invoke("get_transcripts");
+  [transcriptRows, transcriptCategories, auditStatus] = await Promise.all([
+    invoke("get_transcripts"),
+    invoke("get_transcript_categories"),
+    invoke("get_audit_status"),
+  ]);
+  bulkCatSelect.innerHTML = categoryOptions("");
+  document.querySelector("#transcripts-privacy").classList.toggle("hidden", !auditStatus.enabled);
   renderTranscripts();
 }
+
+async function applyCategory(vtts, category) {
+  try {
+    await invoke("set_transcript_category", { vtts, category });
+  } catch (e) {
+    messageDialog(`${e}`, { title: "Couldn't change category", kind: "error" });
+  }
+  await loadTranscripts();
+}
+
+transcriptsList.addEventListener("change", (e) => {
+  const li = e.target.closest(".transcript-row");
+  if (!li) return;
+  if (e.target.matches(".t-sel")) {
+    e.target.checked ? selectedTranscripts.add(li.dataset.vtt) : selectedTranscripts.delete(li.dataset.vtt);
+    renderSelectionBar();
+  } else if (e.target.matches(".t-cat")) {
+    applyCategory([li.dataset.vtt], e.target.value);
+  }
+});
+document.querySelector("#transcripts-bulk-apply").addEventListener("click", async () => {
+  const vtts = [...selectedTranscripts];
+  selectedTranscripts.clear();
+  await applyCategory(vtts, bulkCatSelect.value);
+});
+document.querySelector("#transcripts-clear-sel").addEventListener("click", () => {
+  selectedTranscripts.clear();
+  renderTranscripts();
+});
+document.querySelector("#transcripts-view-shared").addEventListener("click", async () => {
+  const status = await invoke("get_audit_status");
+  if (status.events_file) openPath(status.events_file).catch((e) => messageDialog(`${e}`, { title: "Couldn't open file", kind: "error" }));
+  else messageDialog("Nothing has been shared yet — no category fixes or unmatched titles so far.", { title: "What's shared" });
+});
 
 function showTranscriptsView() {
   showView("transcripts");

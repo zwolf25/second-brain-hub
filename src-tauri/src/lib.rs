@@ -1,3 +1,4 @@
+mod audit;
 mod categorize;
 mod config;
 mod counts;
@@ -185,19 +186,48 @@ fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path)
     }
 }
 
-/// Converts/categorizes any new transcripts, then tells the UI. No-op unless a folder is set.
+/// Shared vault root, derived from the shared-raw path the same way `check_plugin_drift` does.
+fn shared_root(state: &AppState) -> Option<PathBuf> {
+    let cfg = state.config.lock().unwrap();
+    cfg.shared_raw_path.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf())
+}
+
+fn load_rules(state: &AppState) -> categorize::Rules {
+    categorize::Rules::load(shared_root(state).map(|r| r.join("transcript-audit/categories.json")).as_deref())
+}
+
+/// None when the shared vault or this user's inbox slug is missing; corrections still work locally.
+fn audit_for(app: &AppHandle, rules_version: u32) -> Option<audit::Audit> {
+    let state = app.state::<Arc<AppState>>();
+    let slug = config::dirs_home().and_then(|h| std::fs::read_to_string(h.join(".claude/second-brain-inbox/inbox-slug")).ok());
+    audit::Audit::new(shared_root(&state).as_deref(), slug, &state.transcripts_dir, &app.package_info().version.to_string(), rules_version)
+}
+
+/// Converts/categorizes any new transcripts, logs `auto_other` events, flushes the audit queue,
+/// writes the heartbeat, then tells the UI. No-op unless a folder is set.
 /// Blocking (file IO); callers off the main thread only.
 fn scan_transcripts(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let (src, root) = {
-        let cfg = state.config.lock().unwrap();
-        (cfg.transcripts_path.clone(), cfg.shared_raw_path.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
-    };
-    let Some(src) = src else { return };
+    let Some(src) = state.config.lock().unwrap().transcripts_path.clone() else { return };
     let _guard = state.transcripts_scan.lock().unwrap();
-    let rules = categorize::Rules::load(root.map(|r| r.join("transcript-audit/categories.json")).as_deref());
+    let rules = load_rules(&state);
     match transcripts::scan(&src, &state.transcripts_dir, &rules) {
-        Ok(r) => tracing::info!("transcripts scan: {r:?}"),
+        Ok(r) => {
+            tracing::info!("transcripts scan: {r:?}");
+            if let Some(a) = audit_for(app, rules.version) {
+                let events: Vec<_> = r.auto_other.iter().map(|e| a.event("auto_other", e, None, None, None)).collect();
+                let wrote = match a.queue(&events).and_then(|_| a.flush()) {
+                    Ok(n) => n > 0,
+                    Err(e) => {
+                        tracing::warn!("audit flush failed (queued, will retry): {e:#}");
+                        false
+                    }
+                };
+                if let Err(e) = a.heartbeat(wrote) {
+                    tracing::warn!("audit heartbeat failed: {e:#}");
+                }
+            }
+        }
         Err(e) => tracing::warn!("transcripts scan failed: {e:#}"),
     }
     let _ = app.emit("transcripts-updated", ());
@@ -392,6 +422,42 @@ fn set_show_transcripts_page(state: State<Arc<AppState>>, show: bool) -> Result<
 #[tauri::command]
 fn rescan_transcripts(app: AppHandle) {
     std::thread::spawn(move || scan_transcripts(&app));
+}
+
+#[tauri::command]
+fn get_transcript_categories(state: State<Arc<AppState>>) -> Vec<String> {
+    load_rules(&state).categories
+}
+
+/// Manual correction for one or many transcripts. Always applied locally (and remembered for
+/// the series); the audit event is queued and flushed when the shared drive is reachable.
+#[tauri::command]
+fn set_transcript_category(app: AppHandle, state: State<Arc<AppState>>, vtts: Vec<String>, category: String) -> Result<(), String> {
+    let rules = load_rules(&state);
+    if !rules.categories.contains(&category) {
+        return Err(format!("Unknown category: {category}"));
+    }
+    let _guard = state.transcripts_scan.lock().unwrap();
+    let changes = transcripts::set_category(&state.transcripts_dir, &vtts, &category).map_err(|e| e.to_string())?;
+    if let Some(a) = audit_for(&app, rules.version) {
+        let events: Vec<_> = changes
+            .iter()
+            .filter(|c| c.from != category)
+            .map(|c| a.event("manual_change", &c.entry, Some(&c.from), Some(&category), Some(&c.auto_source)))
+            .collect();
+        let wrote = a.queue(&events).and_then(|_| a.flush()).map(|n| n > 0).unwrap_or_else(|e| {
+            tracing::warn!("audit flush failed (queued, will retry): {e:#}");
+            false
+        });
+        let _ = a.heartbeat(wrote);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_audit_status(app: AppHandle) -> audit::Status {
+    let rules_version = load_rules(&app.state::<Arc<AppState>>()).version;
+    audit_for(&app, rules_version).map(|a| a.status()).unwrap_or_else(audit::disabled_status)
 }
 
 #[tauri::command]
@@ -627,6 +693,9 @@ pub fn run() {
             set_show_transcripts_page,
             rescan_transcripts,
             get_transcripts,
+            get_transcript_categories,
+            set_transcript_category,
+            get_audit_status,
             get_raw_count,
             get_inbox_count,
             get_shared_raw_count,

@@ -23,10 +23,8 @@ pub struct TitleRule {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Rules {
-    #[allow(dead_code)] // audit rules_version, section 6
     pub version: u32,
     pub voc_category: String,
-    #[allow(dead_code)] // category dropdown, section 6
     pub categories: Vec<String>,
     pub title_rules: Vec<TitleRule>,
     pub voc_title_keywords: Vec<String>,
@@ -63,6 +61,8 @@ pub struct Input<'a> {
     pub speaker_words: &'a [(String, u32)],
     pub body_lower: &'a str,
     pub words: u32,
+    /// Per-series manual override (title_norm -> category); beats every rule.
+    pub override_category: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,6 +146,9 @@ fn body_score(rules: &Rules, i: &Input) -> Option<Verdict> {
 }
 
 pub fn categorize(rules: &Rules, i: &Input, peers: &[Peer], internal: &HashSet<String>) -> Verdict {
+    if let Some(c) = i.override_category {
+        return verdict(c, "manual", "high");
+    }
     if let Some(v) = title_rule(rules, i.title_norm) {
         return v;
     }
@@ -234,7 +237,7 @@ mod tests {
     }
 
     fn input<'a>(title: &'a str, speakers: &'a [String], words: &'a [(String, u32)], body: &'a str) -> Input<'a> {
-        Input { title_norm: title, speakers, speaker_words: words, body_lower: body, words: body.split_whitespace().count() as u32 }
+        Input { title_norm: title, speakers, speaker_words: words, body_lower: body, words: body.split_whitespace().count() as u32, override_category: None }
     }
 
     fn names(n: &[&str]) -> Vec<String> {
@@ -267,6 +270,17 @@ mod tests {
         assert_eq!(categorize(&rules, &i, &peers, &HashSet::new()).source, "series");
         let weak = [Peer { title_norm: "some new series", speakers: &sp, category: "Kaizen Meetings", source: "body-score" }];
         assert_eq!(categorize(&rules, &i, &weak, &HashSet::new()).category, "Other");
+    }
+
+    #[test]
+    fn manual_override_beats_rules() {
+        let rules = Rules::embedded();
+        let sp = names(&["A", "B", "C"]);
+        let mut i = input("claude office hours", &sp, &[], "x");
+        assert_eq!(categorize(&rules, &i, &[], &HashSet::new()).category, "Group / Team Meetings");
+        i.override_category = Some("Innovation Meetings");
+        let v = categorize(&rules, &i, &[], &HashSet::new());
+        assert_eq!((v.category.as_str(), v.source.as_str()), ("Innovation Meetings", "manual"));
     }
 
     #[test]

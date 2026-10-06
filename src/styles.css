@@ -629,6 +629,49 @@ button:hover {
   color: #777;
 }
 
+/* Transcripts: selection bar, category select, privacy line. */
+.transcripts-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.5em 1.4em;
+  font-size: 0.85em;
+  background: #eef2ff;
+  flex: none;
+}
+
+.transcripts-privacy {
+  margin: 0.5em 1.4em 0;
+  font-size: 0.75em;
+}
+
+.linklike {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #396cd8;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.transcript-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.transcript-head .skill-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.t-cat {
+  max-width: 16em;
+  font-size: 0.78em;
+  padding: 0.15em 0.3em;
+}
+
 /* Transcripts view reuses the Skills list/rows; these are its extras. */
 .transcripts-toggle {
   margin-left: auto;
@@ -678,6 +721,13 @@ button:hover {
 }
 
 @media (prefers-color-scheme: dark) {
+  .transcripts-bar {
+    background: #2a2f45;
+  }
+  .linklike {
+    background: none;
+    color: #9db4f0;
+  }
   .transcript-row:hover,
   .transcript-row:focus {
     background: #2a2f45;
