@@ -330,7 +330,7 @@ function renderTranscripts() {
         <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
         <button class="t-actions topbar-btn" aria-label="Actions" aria-haspopup="menu" title="Actions">⋯</button>
       </div>
-      <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · identical to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
+      <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · ${r.near_duplicate ? "nearly identical" : "identical"} to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
     `;
     transcriptsList.appendChild(li);
   }

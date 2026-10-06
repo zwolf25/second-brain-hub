@@ -206,6 +206,9 @@ pub struct Entry {
     /// "manual" or "auto"; a moved file is never auto-moved again.
     #[serde(default)]
     pub moved_by: Option<String>,
+    /// `duplicate_of` was set by the near-duplicate guard (>= NEAR_DUP_MIN shingle overlap), not an exact hash match.
+    #[serde(default)]
+    pub near: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -370,7 +373,69 @@ fn assign_duplicates(state: &mut State) {
         names.sort_by_key(|n| (state.entries[n].date.clone().unwrap_or_else(|| "9999".into()), n.clone()));
         let canonical = names[0].clone();
         for (i, n) in names.iter().enumerate() {
-            state.entries.get_mut(n).unwrap().duplicate_of = (i > 0).then(|| canonical.clone());
+            let e = state.entries.get_mut(n).unwrap();
+            (e.duplicate_of, e.near) = ((i > 0).then(|| canonical.clone()), false);
+        }
+    }
+}
+
+/// Trivially different re-exports (same speakers, ~same length) that overlap this much count as duplicates.
+const NEAR_DUP_MIN: f64 = 0.98;
+
+fn shingles(text: &str) -> HashSet<u64> {
+    use std::hash::{Hash, Hasher};
+    let words: Vec<String> = merge_cues(parse_cues(text)).iter().flat_map(|c| c.text.split_whitespace().map(str::to_lowercase).collect::<Vec<_>>()).collect();
+    words
+        .windows(5)
+        .map(|w| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            w.hash(&mut h);
+            h.finish()
+        })
+        .collect()
+}
+
+/// Second pass after the exact-hash grouping: a later canonical file with the same speaker set, a word count
+/// within 2% and >= NEAR_DUP_MIN shingle Jaccard against an earlier canonical file points at it.
+/// Files are read only for candidate pairs, so a quiet folder costs nothing.
+// ponytail: O(n^2) over canonical entries with a cheap prefilter; add a sketch to state.json if folders reach thousands.
+fn assign_near_duplicates(state: &mut State, src: &Path) {
+    let mut canon: Vec<String> = state.entries.iter().filter(|(_, e)| e.duplicate_of.is_none() && !e.content_hash.is_empty()).map(|(n, _)| n.clone()).collect();
+    canon.sort_by_key(|n| (state.entries[n].date.clone().unwrap_or_else(|| "9999".into()), n.clone()));
+    let key = |e: &Entry| {
+        let mut sp = e.speakers.clone();
+        sp.sort();
+        sp
+    };
+    let mut cache: HashMap<String, HashSet<u64>> = HashMap::new();
+    let mut keepers: Vec<String> = Vec::new();
+    for n in canon {
+        let e = &state.entries[&n];
+        let hit = keepers.iter().find(|k| {
+            let o = &state.entries[*k];
+            key(o) == key(e) && o.words.abs_diff(e.words) as f64 <= 0.02 * o.words.max(e.words) as f64
+        });
+        let mut found = None;
+        if let Some(k) = hit.cloned() {
+            for name in [&k, &n] {
+                if !cache.contains_key(name) {
+                    let Ok(t) = std::fs::read_to_string(src.join(name)) else { continue };
+                    cache.insert(name.clone(), shingles(&t));
+                }
+            }
+            if let (Some(a), Some(b)) = (cache.get(&k), cache.get(&n)) {
+                let union = a.union(b).count();
+                if union > 0 && a.intersection(b).count() as f64 / union as f64 >= NEAR_DUP_MIN {
+                    found = Some(k);
+                }
+            }
+        }
+        match found {
+            Some(k) => {
+                let e = state.entries.get_mut(&n).unwrap();
+                (e.duplicate_of, e.near) = (Some(k), true);
+            }
+            None => keepers.push(n),
         }
     }
 }
@@ -438,6 +503,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
         }
     }
     assign_duplicates(&mut state);
+    assign_near_duplicates(&mut state, src);
 
     let converted = today_utc();
     let names: Vec<String> = state.entries.keys().cloned().collect();
@@ -691,6 +757,7 @@ pub struct Row {
     pub duration_min: u32,
     pub words: u32,
     pub duplicate_of: Option<String>,
+    pub near_duplicate: bool,
     /// The `.md` a double-click opens: own file, or the canonical copy for a duplicate.
     pub open_path: Option<String>,
     /// False when the `.md` was deleted or moved outside the Hub; the UI says so instead of erroring.
@@ -721,6 +788,7 @@ pub fn rows(out: &Path) -> Vec<Row> {
                 duration_min: e.duration_min,
                 words: e.words,
                 duplicate_of: e.duplicate_of.clone(),
+                near_duplicate: e.near,
                 open_path: open,
                 hidden: e.hidden,
                 hidden_reason: e.hidden_reason.clone(),
@@ -1008,6 +1076,28 @@ mod tests {
         std::fs::write(src.join("New_2026-10-01_Transcript.vtt"), vtt("B", "fresh")).unwrap();
         let third = scan(&src, &out, &rules).unwrap();
         assert_eq!((third.processed, third.converted), (1, 1));
+    }
+
+    #[test]
+    fn near_duplicate_guard_flags_trivial_reexports_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, out) = (tmp.path().join("src"), tmp.path().join("out"));
+        std::fs::create_dir(&src).unwrap();
+        let body: Vec<String> = (0..1000).map(|i| format!("word{i}")).collect();
+        let base = body.join(" ");
+        // re-export with one word changed: 5 of ~1000 shingles differ
+        let tweaked = base.replacen("word500", "changed", 1);
+        let mut real = body.clone();
+        real.iter_mut().skip(100).step_by(3).for_each(|w| w.push('x')); // ~1/3 of the words differ
+        std::fs::write(src.join("Sync_2026-09-03_Transcript.vtt"), vtt("A", &base)).unwrap();
+        std::fs::write(src.join("Sync_2026-09-10_Transcript.vtt"), vtt("A", &tweaked)).unwrap();
+        std::fs::write(src.join("Sync_2026-09-17_Transcript.vtt"), vtt("A", &real.join(" "))).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let rows = rows(&out);
+        let by = |d: &str| rows.iter().find(|r| r.vtt.contains(d)).unwrap();
+        assert_eq!(by("09-10").duplicate_of.as_deref(), Some("Sync_2026-09-03_Transcript.vtt"));
+        assert!(by("09-10").near_duplicate && !by("09-03").near_duplicate);
+        assert!(by("09-17").duplicate_of.is_none(), "genuinely different content stays");
     }
 
     #[test]
