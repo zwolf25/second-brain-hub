@@ -283,7 +283,15 @@ function renderSelectionBar() {
   const n = selectedTranscripts.size;
   transcriptsBar.classList.toggle("hidden", n === 0);
   document.querySelector("#transcripts-selected").textContent = `${n} selected`;
+  // All selected already hidden -> the button unhides; any visible one in the mix -> it hides.
+  const hideBtn = document.querySelector("#transcripts-hide-sel");
+  hideBtn.textContent = selectionAllHidden() ? "Unhide" : "Hide";
 }
+
+const selectionAllHidden = () => {
+  const rows = transcriptRows.filter((r) => selectedTranscripts.has(r.vtt));
+  return rows.length > 0 && rows.every((r) => r.hidden);
+};
 
 function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
@@ -432,7 +440,7 @@ async function logitTranscripts(vtts) {
 
 const selectedList = () => [...selectedTranscripts];
 document.querySelector("#transcripts-move-sel").addEventListener("click", () => moveTranscripts(selectedList()));
-document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), true));
+document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), !selectionAllHidden()));
 document.querySelector("#transcripts-logit-sel").addEventListener("click", () => logitTranscripts(selectedList()));
 
 // Per-row "⋯" menu: Open, Move…, Run log-it, Hide/Unhide for that one transcript.
