@@ -60,6 +60,26 @@
             </div>
           </li>
 
+          <li class="settings-group-label">Transcripts</li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Teams transcripts folder <span class="setting-opt">(optional)</span></span>
+              <span id="transcripts-status-msg" class="setting-value muted"></span>
+            </div>
+            <div class="setting-row-actions">
+              <button id="use-transcripts-autodetect" class="topbar-btn hidden">Use detected folder</button>
+              <button id="browse-transcripts-folder" class="topbar-btn">Browse for folder…</button>
+              <button id="stop-transcripts-btn" class="topbar-btn hidden" title="Stops watching; converted files stay">Stop syncing</button>
+            </div>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
+              <span class="setting-label">Show Transcripts page</span>
+              <span class="setting-value">Adds a Transcripts button to the top bar</span>
+            </div>
+            <input id="show-transcripts-page" type="checkbox" />
+          </li>
+
           <li class="settings-group-label">Default app</li>
           <li class="setting-row">
             <div class="setting-row-main">
@@ -97,6 +117,7 @@
           <button id="raw-badge" class="topbar-btn hidden" title="Unprocessed raw notes — click to run /wiki-builder">📄 <span id="raw-count-num">0</span></button>
           <button id="inbox-badge" class="topbar-btn hidden" title="Items in your inbox — click to run /inbox-review">📥 <span id="inbox-count-num">0</span></button>
           <button id="shared-raw-badge" class="topbar-btn hidden" title="Unprocessed raw files across the whole shared Second Brain — no action needed, just a freshness signal. Click to open the folder.">🌐 <span id="shared-raw-count-num">0</span></button>
+          <button id="transcripts-btn" class="topbar-btn" title="Teams transcripts, converted to markdown">📝 Transcripts</button>
           <button id="skills-badge" class="topbar-btn" title="See all skills" data-tooltip="See all skills">🧩 Skills</button>
           <button id="new-session-btn" class="topbar-btn" title="Start a new Claude Code session">
             <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
@@ -167,6 +188,25 @@
           <p class="hint muted">Type to search every skill; clear the box to see the 8 most recent, then use “Show all skills” to browse the rest.</p>
         </div>
         <ul id="skills-list" class="skills-list"></ul>
+      </section>
+
+      <!-- Transcripts: Teams .vtt files converted to markdown on this machine
+           (zero tokens). Double-click a row to open its markdown in the viewer. -->
+      <section id="transcripts-view" class="skills-view hidden">
+        <header class="topbar">
+          <button id="transcripts-back-btn" class="topbar-btn" title="Back to search">← Back</button>
+          <span class="viewer-title">Transcripts</span>
+          <span id="transcripts-status" class="map-stats"></span>
+          <label class="transcripts-toggle"><input id="transcripts-show-dups" type="checkbox" /> <span id="transcripts-dups-label">Duplicates</span></label>
+        </header>
+        <div id="transcripts-empty" class="transcripts-empty hidden">
+          <p>Teams transcripts, converted to markdown on your machine. Nothing is sent anywhere.</p>
+          <p>
+            <button id="transcripts-setup-btn" class="topbar-btn">Set up</button>
+            <button id="transcripts-notnow-btn" class="topbar-btn">Not now</button>
+          </p>
+        </div>
+        <ul id="transcripts-list" class="skills-list"></ul>
       </section>
 
       <div id="loading-overlay" class="loading-overlay hidden">

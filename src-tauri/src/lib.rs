@@ -1,3 +1,4 @@
+mod categorize;
 mod config;
 mod counts;
 #[cfg(target_os = "macos")]
@@ -10,6 +11,7 @@ mod plugins;
 mod render;
 mod search;
 mod skills;
+mod transcripts;
 mod watcher;
 
 use config::AppConfig;
@@ -41,6 +43,10 @@ struct AppState {
     raw_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     inbox_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
     shared_raw_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
+    transcripts_watcher: Mutex<Option<Debouncer<notify::RecommendedWatcher>>>,
+    transcripts_dir: PathBuf,
+    /// Serializes scans: the watcher callback, launch scan and manual rescan can overlap.
+    transcripts_scan: Mutex<()>,
     status: Mutex<IndexStatus>,
     raw_count: Mutex<Option<usize>>,
     inbox_count: Mutex<Option<usize>>,
@@ -179,6 +185,40 @@ fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path)
     }
 }
 
+/// Converts/categorizes any new transcripts, then tells the UI. No-op unless a folder is set.
+/// Blocking (file IO); callers off the main thread only.
+fn scan_transcripts(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let (src, root) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.transcripts_path.clone(), cfg.shared_raw_path.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
+    };
+    let Some(src) = src else { return };
+    let _guard = state.transcripts_scan.lock().unwrap();
+    let rules = categorize::Rules::load(root.map(|r| r.join("transcript-audit/categories.json")).as_deref());
+    match transcripts::scan(&src, &state.transcripts_dir, &rules) {
+        Ok(r) => tracing::info!("transcripts scan: {r:?}"),
+        Err(e) => tracing::warn!("transcripts scan failed: {e:#}"),
+    }
+    let _ = app.emit("transcripts-updated", ());
+}
+
+fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
+    let state = app.state::<Arc<AppState>>();
+    let app_for_watcher = app.clone();
+    match watcher::start(path, move || scan_transcripts(&app_for_watcher)) {
+        Ok(debouncer) => *state.transcripts_watcher.lock().unwrap() = Some(debouncer),
+        Err(e) => tracing::warn!("failed to start transcripts-folder watcher: {e}"),
+    }
+}
+
+/// Starts the watcher and a full scan (new files since last launch) off the UI thread.
+fn begin_transcripts(app: &AppHandle, path: &std::path::Path) {
+    start_watching_transcripts(app, path);
+    let app = app.clone();
+    std::thread::spawn(move || scan_transcripts(&app));
+}
+
 /// Checked at launch and on Refresh (`refresh_plugin_drift`) — no watcher here
 /// (unlike the raw/inbox counts).
 /// Shared vault root is the shared-raw folder's parent, since
@@ -303,6 +343,60 @@ fn set_shared_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String
     recount_shared_raw(&app);
     check_plugin_drift(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn autodetect_transcripts() -> Option<String> {
+    transcripts::autodetect_folder().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn set_transcripts_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.transcripts_path = Some(path.clone());
+        config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
+    }
+    *state.transcripts_watcher.lock().unwrap() = None;
+    begin_transcripts(&app, &path);
+    Ok(())
+}
+
+/// "Stop syncing": halts the watcher; converted files and state stay, so re-enabling reuses them.
+#[tauri::command]
+fn stop_transcripts(state: State<Arc<AppState>>) -> Result<(), String> {
+    *state.transcripts_watcher.lock().unwrap() = None;
+    let mut cfg = state.config.lock().unwrap();
+    cfg.transcripts_path = None;
+    config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn dismiss_transcripts(state: State<Arc<AppState>>) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.transcripts_dismissed = true;
+    config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_show_transcripts_page(state: State<Arc<AppState>>, show: bool) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.hide_transcripts_page = !show;
+    config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rescan_transcripts(app: AppHandle) {
+    std::thread::spawn(move || scan_transcripts(&app));
+}
+
+#[tauri::command]
+fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
+    transcripts::rows(&state.transcripts_dir)
 }
 
 #[tauri::command]
@@ -463,6 +557,9 @@ pub fn run() {
                 raw_watcher: Mutex::new(None),
                 inbox_watcher: Mutex::new(None),
                 shared_raw_watcher: Mutex::new(None),
+                transcripts_watcher: Mutex::new(None),
+                transcripts_dir: data_dir.join("transcripts"),
+                transcripts_scan: Mutex::new(()),
                 status: Mutex::new(IndexStatus::Idle { count: 0 }),
                 raw_count: Mutex::new(None),
                 inbox_count: Mutex::new(None),
@@ -501,6 +598,9 @@ pub fn run() {
                 start_watching_shared_raw(&app_handle, &shared_raw_path);
                 recount_shared_raw(&app_handle);
             }
+            if let Some(path) = config.transcripts_path {
+                begin_transcripts(handle, &path);
+            }
             check_plugin_drift(handle);
 
             Ok(())
@@ -520,6 +620,13 @@ pub fn run() {
             set_raw_path,
             set_inbox_path,
             set_shared_raw_path,
+            autodetect_transcripts,
+            set_transcripts_path,
+            stop_transcripts,
+            dismiss_transcripts,
+            set_show_transcripts_page,
+            rescan_transcripts,
+            get_transcripts,
             get_raw_count,
             get_inbox_count,
             get_shared_raw_count,

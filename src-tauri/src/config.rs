@@ -11,6 +11,14 @@ pub struct AppConfig {
     pub inbox_path: Option<PathBuf>,
     #[serde(default)]
     pub shared_raw_path: Option<PathBuf>,
+    /// Folder of Teams `.vtt` transcripts. `None` = feature off: nothing converts, watches or writes.
+    #[serde(default)]
+    pub transcripts_path: Option<PathBuf>,
+    /// "Not now" on the Transcripts empty state; no nudges while set.
+    #[serde(default)]
+    pub transcripts_dismissed: bool,
+    #[serde(default)]
+    pub hide_transcripts_page: bool,
 }
 
 fn config_file(config_dir: &Path) -> PathBuf {

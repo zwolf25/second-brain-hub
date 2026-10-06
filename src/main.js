@@ -11,6 +11,7 @@ const searchView = document.querySelector("#search-view");
 const viewerView = document.querySelector("#viewer-view");
 const mapView = document.querySelector("#map-view");
 const skillsView = document.querySelector("#skills-view");
+const transcriptsView = document.querySelector("#transcripts-view");
 const onboardingError = document.querySelector("#onboarding-error");
 const settingsBackBtn = document.querySelector("#settings-back-btn");
 const searchInput = document.querySelector("#search-input");
@@ -26,10 +27,15 @@ let debounceTimer = null;
 // One of these per settings-section (vault/raw/inbox) — same autodetect →
 // confirm-or-browse → persist shape, so it's a factory instead of copy-pasted
 // three times.
-function makePathSection({ label, statusEl, useBtn, browseBtn, autodetectCmd, setCmd, configKey, required }) {
+function makePathSection({ label, statusEl, useBtn, browseBtn, autodetectCmd, setCmd, configKey, required, onRefresh }) {
   let detected = null;
 
   async function refresh() {
+    await refreshStatus();
+    onRefresh?.();
+  }
+
+  async function refreshStatus() {
     const config = await invoke("get_config");
     const current = config[configKey];
     if (current) {
@@ -111,6 +117,41 @@ const sharedRawSection = makePathSection({
   required: false,
 });
 
+const stopTranscriptsBtn = document.querySelector("#stop-transcripts-btn");
+const showTranscriptsPageBox = document.querySelector("#show-transcripts-page");
+const transcriptsSection = makePathSection({
+  label: "a transcripts folder",
+  statusEl: document.querySelector("#transcripts-status-msg"),
+  useBtn: document.querySelector("#use-transcripts-autodetect"),
+  browseBtn: document.querySelector("#browse-transcripts-folder"),
+  autodetectCmd: "autodetect_transcripts",
+  setCmd: "set_transcripts_path",
+  configKey: "transcripts_path",
+  required: false,
+  onRefresh: async () => {
+    const config = await invoke("get_config");
+    stopTranscriptsBtn.classList.toggle("hidden", !config.transcripts_path);
+    showTranscriptsPageBox.checked = !config.hide_transcripts_page;
+    applyTranscriptsNav(config);
+  },
+});
+
+stopTranscriptsBtn.addEventListener("click", async () => {
+  const ok = await confirmDialog("Stop watching the transcripts folder? Converted files and the index stay on this machine, and turning it back on reuses them.", {
+    title: "Stop syncing transcripts",
+    okLabel: "Stop syncing",
+    cancelLabel: "Keep syncing",
+  });
+  if (!ok) return;
+  await invoke("stop_transcripts");
+  transcriptsSection.refresh();
+});
+
+showTranscriptsPageBox.addEventListener("change", async () => {
+  await invoke("set_show_transcripts_page", { show: showTranscriptsPageBox.checked });
+  applyTranscriptsNav(await invoke("get_config"));
+});
+
 async function updateBackButtonVisibility() {
   const config = await invoke("get_config");
   settingsBackBtn.classList.toggle("hidden", !config.vault_path);
@@ -161,7 +202,7 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
-const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView };
+const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView };
 function showView(name) {
   for (const [key, el] of Object.entries(VIEWS)) el.classList.toggle("hidden", key !== name);
 }
@@ -173,6 +214,7 @@ async function showSettingsView() {
   rawSection.refresh();
   inboxSection.refresh();
   sharedRawSection.refresh();
+  transcriptsSection.refresh();
   refreshDefaultHandlerSection();
   updateBackButtonVisibility();
   document.querySelector("#app-version-value").textContent = await getVersion();
@@ -190,10 +232,129 @@ function showSearchView() {
   searchInput.focus();
 }
 
+
+// --- Transcripts: Teams .vtt files converted to markdown by the Rust side
+// (zero tokens). Opt-in: with no folder set this page is just an empty state. ---
+
+const transcriptsList = document.querySelector("#transcripts-list");
+const transcriptsEmpty = document.querySelector("#transcripts-empty");
+const transcriptsStatus = document.querySelector("#transcripts-status");
+const transcriptsShowDups = document.querySelector("#transcripts-show-dups");
+const transcriptsDupsLabel = document.querySelector("#transcripts-dups-label");
+const transcriptsNotNowBtn = document.querySelector("#transcripts-notnow-btn");
+let transcriptRows = [];
+let transcriptsNoticeTimer = null;
+
+function applyTranscriptsNav(config) {
+  document.querySelector("#transcripts-btn").classList.toggle("hidden", !!config.hide_transcripts_page);
+}
+
+function transcriptsNotice(text) {
+  transcriptsStatus.textContent = text;
+  clearTimeout(transcriptsNoticeTimer);
+  transcriptsNoticeTimer = setTimeout(renderTranscripts, 4000);
+}
+
+function renderTranscripts() {
+  const scroll = transcriptsList.scrollTop;
+  const dups = transcriptRows.filter((r) => r.duplicate_of);
+  const shown = transcriptsShowDups.checked ? transcriptRows : transcriptRows.filter((r) => !r.duplicate_of);
+  transcriptsDupsLabel.textContent = `Duplicates (${dups.length})`;
+  transcriptsStatus.textContent = `${transcriptRows.length - dups.length} transcripts`;
+  const titleOf = (vtt) => transcriptRows.find((r) => r.vtt === vtt)?.title ?? vtt;
+  transcriptsList.innerHTML = "";
+  for (const r of shown) {
+    const li = document.createElement("li");
+    li.className = `skill-row transcript-row${r.duplicate_of ? " is-dup" : ""}`;
+    li.tabIndex = 0;
+    li.dataset.vtt = r.vtt;
+    const meta = [r.date, `${r.speakers} speaker${r.speakers === 1 ? "" : "s"}`, `${r.duration_min} min`, `${r.words.toLocaleString()} words`];
+    li.innerHTML = `
+      <div class="skill-row-head">
+        <span class="skill-name">${escapeHtml(r.title)}</span>
+        <span class="transcript-cat${r.confidence === "low" ? " suggested" : ""}" title="${escapeHtml(r.category_source)}">${escapeHtml(r.category)}${r.confidence === "low" ? " (suggested)" : ""}</span>
+      </div>
+      <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · same content as ${escapeHtml(titleOf(r.duplicate_of))}` : ""}</span>
+    `;
+    transcriptsList.appendChild(li);
+  }
+  transcriptsList.scrollTop = scroll;
+}
+
+async function loadTranscripts() {
+  const config = await invoke("get_config");
+  const configured = !!config.transcripts_path;
+  transcriptsEmpty.classList.toggle("hidden", configured);
+  transcriptsList.classList.toggle("hidden", !configured);
+  transcriptsNotNowBtn.classList.toggle("hidden", !!config.transcripts_dismissed);
+  document.querySelector(".transcripts-toggle").classList.toggle("hidden", !configured);
+  if (!configured) {
+    transcriptsStatus.textContent = "";
+    return;
+  }
+  transcriptRows = await invoke("get_transcripts");
+  renderTranscripts();
+}
+
+function showTranscriptsView() {
+  showView("transcripts");
+  loadTranscripts();
+}
+
+let transcriptsScroll = 0;
+
+// Double-click (or Enter) opens the converted markdown in the viewer; a duplicate
+// opens its original (the Rust side resolves open_path). Back restores scroll.
+function openTranscript(vtt) {
+  const row = transcriptRows.find((r) => r.vtt === vtt);
+  if (!row) return;
+  if (!row.md_exists) {
+    transcriptsNotice(row.open_path ? "That markdown file is missing — it was moved or deleted." : "Not converted yet — try again in a moment.");
+    return;
+  }
+  transcriptsScroll = transcriptsList.scrollTop;
+  openInViewer(row.open_path, "transcripts");
+}
+
+const onTranscriptRow = (e) => (e.target.closest("button, input, select, label") ? null : e.target.closest(".transcript-row"));
+transcriptsList.addEventListener("dblclick", (e) => {
+  const li = onTranscriptRow(e);
+  if (li) openTranscript(li.dataset.vtt);
+});
+transcriptsList.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const li = onTranscriptRow(e);
+  if (li) openTranscript(li.dataset.vtt);
+});
+transcriptsShowDups.addEventListener("change", renderTranscripts);
+
+document.querySelector("#transcripts-setup-btn").addEventListener("click", async () => {
+  const found = await invoke("autodetect_transcripts");
+  let path = null;
+  if (found && (await confirmDialog(`Use this folder?\n\n${found}`, { title: "Transcripts folder", okLabel: "Use this folder", cancelLabel: "Choose another…" }))) {
+    path = found;
+  } else {
+    path = await openDialog({ directory: true, multiple: false });
+  }
+  if (!path) return;
+  try {
+    await invoke("set_transcripts_path", { path });
+  } catch (e) {
+    messageDialog(`${e}`, { title: "Couldn't use that folder", kind: "error" });
+    return;
+  }
+  await loadTranscripts();
+  transcriptsNotice("Converting transcripts…");
+});
+transcriptsNotNowBtn.addEventListener("click", async () => {
+  await invoke("dismiss_transcripts");
+  transcriptsNotNowBtn.classList.add("hidden");
+});
+
 // --- Markdown viewer (read-only) ---
 
 let currentViewerPath = null;
-let viewerReturnTo = "search"; // "search" | "map" — which view the viewer's Back button returns to
+let viewerReturnTo = "search"; // "search" | "map" | "transcripts" — which view the viewer's Back button returns to
 
 // Resolves a markdown-relative image src (e.g. "images/foo.png",
 // "../assets/x.png") against the source file's own directory, then rewrites
@@ -1000,6 +1161,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     invoke("refresh_plugin_drift").then(renderSkillsBadge);
   });
 
+  document.querySelector("#transcripts-btn").addEventListener("click", showTranscriptsView);
+  document.querySelector("#transcripts-back-btn").addEventListener("click", showSearchView);
+  invoke("get_config").then(applyTranscriptsNav);
+  listen("transcripts-updated", () => {
+    if (!transcriptsView.classList.contains("hidden")) loadTranscripts();
+  });
+
   document.querySelector("#map-btn").addEventListener("click", showMapView);
   document.querySelector("#map-back-btn").addEventListener("click", showSearchView);
 
@@ -1026,7 +1194,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!(await confirmLeaveEdit())) return;
     exitEdit();
     if (viewerReturnTo === "map") showMapView();
-    else showSearchView();
+    else if (viewerReturnTo === "transcripts") {
+      // List DOM is untouched while the viewer is up, so selection/filters survive; only scroll resets.
+      showView("transcripts");
+      transcriptsList.scrollTop = transcriptsScroll;
+    } else showSearchView();
   });
   document.querySelector("#viewer-open-external-btn").addEventListener("click", () => {
     if (currentViewerPath) {

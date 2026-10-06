@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "voc_category": "Client Meetings / VoC Interviews",
+  "categories": [
+    "1-on-1s", "Client Meetings / VoC Interviews", "Project Meetings / Standups",
+    "Roadmapping Meetings", "Innovation Meetings", "LPM Meetings",
+    "Product Commercialization Meetings", "Release Meetings",
+    "PD / Policy Deployment Meetings", "Obeya Meetings", "Group / Team Meetings",
+    "Hyper Enterprise Meetings", "Partner Meetings", "Scoping Reviews",
+    "Kaizen Meetings", "CAB Meetings", "Customer Related Internal Syncs",
+    "Town Halls", "Other"
+  ],
+  "title_rules": [
+    {"id": "walmart-internal", "category": "Hyper Enterprise Meetings", "all": ["walmart", "internal"]},
+    {"id": "hyper-enterprise", "category": "Hyper Enterprise Meetings", "any": ["hyper enterprise", "accelerated development"]},
+    {"id": "customer-internal", "category": "Customer Related Internal Syncs", "all": ["internal"], "any": ["roadchef", "winco", "wincco"]},
+    {"id": "kaizen", "category": "Kaizen Meetings", "any": ["kaizen"]},
+    {"id": "release", "category": "Release Meetings", "any": ["toi]", "weekly release management"]},
+    {"id": "cab", "category": "CAB Meetings", "any": ["cab meeting", "cab deck", "cab -"]},
+    {"id": "town-hall", "category": "Town Halls", "any": ["town hall"]},
+    {"id": "scoping", "category": "Scoping Reviews", "any": ["scoping review", "scope review", "scoping wrap"]},
+    {"id": "partner", "category": "Partner Meetings", "any": ["viewpost", "glacier grid"]},
+    {"id": "lpm", "category": "LPM Meetings", "any": ["lpm", "red program review"]},
+    {"id": "commercialization", "category": "Product Commercialization Meetings", "any": ["easypay", "ai pricing", "packaging"]},
+    {"id": "obeya", "category": "Obeya Meetings", "any": ["obeya"]},
+    {"id": "roadmapping", "category": "Roadmapping Meetings", "any": ["2027 roadmap", "roadmapping office hours"]},
+    {"id": "innovation", "category": "Innovation Meetings", "any": ["innovation weekly"]},
+    {"id": "pd", "category": "PD / Policy Deployment Meetings", "any": ["2027 pd", "ai business empowerment", "evalueserve", "review new verticals"]},
+    {"id": "group", "category": "Group / Team Meetings", "any": ["office hours", "monthly fr risk review"]},
+    {"id": "project", "category": "Project Meetings / Standups", "any": ["supply manager migration", "ai action hub sync", "mcp poc demo", "issue list ui"]},
+    {"id": "one-on-one", "category": "1-on-1s", "any": ["zac-casey"]}
+  ],
+  "voc_title_keywords": ["interview", "voc", "discovery", "customer feedback", "listening session", "user research"],
+  "voc_body_cues": ["tell me about", "walk me through", "how do you today", "what's your biggest", "biggest pain", "pain point", "day-to-day", "how do you currently", "what does your process"],
+  "body_terms": {
+    "Kaizen Meetings": ["kaizen", "sustainment", "report-out"],
+    "Release Meetings": ["release notes", "release management", "beta", "toi"],
+    "Roadmapping Meetings": ["roadmap", "gate review", "steerco"],
+    "Obeya Meetings": ["obeya", "renewal", "renewals"],
+    "Innovation Meetings": ["innovation", "pws", "hypothesis"],
+    "CAB Meetings": ["cab", "advisory board"],
+    "LPM Meetings": ["lpm", "kpi review"]
+  }
+}

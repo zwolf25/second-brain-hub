@@ -629,6 +629,73 @@ button:hover {
   color: #777;
 }
 
+/* Transcripts view reuses the Skills list/rows; these are its extras. */
+.transcripts-toggle {
+  margin-left: auto;
+  font-size: 0.8em;
+  color: #777;
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.transcripts-empty {
+  padding: 2.5em 1.4em;
+  text-align: center;
+  color: #777;
+}
+
+.transcript-row {
+  cursor: default;
+  user-select: none;
+  padding: 0.6em 0.5em;
+  border-radius: 6px;
+}
+
+.transcript-row:hover,
+.transcript-row:focus {
+  background: #eef2ff;
+  outline: none;
+}
+
+.transcript-row.is-dup {
+  opacity: 0.65;
+}
+
+.transcript-cat {
+  font-size: 0.74em;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  background: #e8edf9;
+  color: #396cd8;
+  white-space: nowrap;
+}
+
+.transcript-cat.suggested {
+  font-style: italic;
+  background: #f0f0f0;
+  color: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+  .transcript-row:hover,
+  .transcript-row:focus {
+    background: #2a2f45;
+  }
+  .transcript-cat {
+    background: #2a3350;
+    color: #9db4f0;
+  }
+  .transcript-cat.suggested {
+    background: #333;
+    color: #aaa;
+  }
+  .transcripts-toggle,
+  .transcripts-empty {
+    color: #aaa;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f0f0f0;
