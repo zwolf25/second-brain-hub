@@ -296,9 +296,9 @@ function renderTranscripts() {
   // Identical content on a later date means Teams saved the wrong transcript, so the real one is missing.
   const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
   transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
+  transcriptsDupsLabel.parentElement.title = dups.length ? `${dups.length} files across ${meetings} meetings are identical to an earlier one — Teams likely saved the wrong transcript, so the real one is missing.` : "";
   transcriptsStatus.textContent =
     `${transcriptRows.length - dups.length - hiddenCount} transcripts` +
-    (dups.length ? ` · ${dups.length} suspect files across ${meetings} meetings` : "") +
     moveErrorText +
     (auditStatus.stuck_days >= 3 ? ` · ⚠ category log not reaching the shared drive for ${auditStatus.stuck_days} days` : "");
   const labelOf = (vtt) => {
