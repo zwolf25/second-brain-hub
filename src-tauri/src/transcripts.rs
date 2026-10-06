@@ -209,8 +209,19 @@ fn state_file(out: &Path) -> PathBuf {
     out.join("state.json")
 }
 
+/// Category renames: stored names are migrated on load so old state follows the rules file.
+const RENAMED: &[(&str, &str)] = &[("PD / Policy Deployment Meetings", "PD / Strat Meetings")];
+
 pub fn load_state(out: &Path) -> State {
-    std::fs::read_to_string(state_file(out)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let mut st: State = std::fs::read_to_string(state_file(out)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let fix = |c: &mut String| {
+        if let Some((_, new)) = RENAMED.iter().find(|(old, _)| old == c) {
+            *c = new.to_string();
+        }
+    };
+    st.entries.values_mut().for_each(|e| fix(&mut e.category));
+    st.overrides.values_mut().for_each(fix);
+    st
 }
 
 fn save_state(out: &Path, state: &State) -> Result<()> {
@@ -603,6 +614,21 @@ mod tests {
         assert_eq!(title_and_date("talk_2026-01-02_Transcript.vtt"), ("talk".to_string(), Some("2026-01-02".to_string())));
         assert_eq!(title_and_date("odd name.vtt"), ("odd name".to_string(), None));
         assert_eq!(title_norm("Kaizen Report\u{2011}Out"), "kaizen report-out");
+    }
+
+    #[test]
+    fn renamed_category_migrates_on_load() {
+        let d = std::env::temp_dir().join(format!("tr-rename-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            state_file(&d),
+            r#"{"entries":{"a.vtt":{"title":"t","vtt_mtime":1,"category":"PD / Policy Deployment Meetings","category_source":"title","confidence":"high"}},"overrides":{"x":"PD / Policy Deployment Meetings"}}"#,
+        )
+        .unwrap();
+        let st = load_state(&d);
+        assert_eq!(st.entries["a.vtt"].category, "PD / Strat Meetings");
+        assert_eq!(st.overrides["x"], "PD / Strat Meetings");
+        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]

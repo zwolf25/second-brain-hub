@@ -5,7 +5,7 @@
     "1-on-1s", "Client Meetings / VoC Interviews", "Project Meetings / Standups",
     "Roadmapping Meetings", "Innovation Meetings", "LPM Meetings",
     "Product Commercialization Meetings", "Release Meetings",
-    "PD / Policy Deployment Meetings", "Obeya Meetings", "Group / Team Meetings",
+    "PD / Strat Meetings", "Obeya Meetings", "Group / Team Meetings",
     "Hyper Enterprise Meetings", "Partner Meetings", "Scoping Reviews",
     "Kaizen Meetings", "CAB Meetings", "Customer Related Internal Syncs",
     "Town Halls", "Other"
@@ -25,7 +25,7 @@
     {"id": "obeya", "category": "Obeya Meetings", "any": ["obeya"]},
     {"id": "roadmapping", "category": "Roadmapping Meetings", "any": ["2027 roadmap", "roadmapping office hours"]},
     {"id": "innovation", "category": "Innovation Meetings", "any": ["innovation weekly"]},
-    {"id": "pd", "category": "PD / Policy Deployment Meetings", "any": ["2027 pd", "ai business empowerment", "evalueserve", "review new verticals"]},
+    {"id": "pd", "category": "PD / Strat Meetings", "any": ["2027 pd", "ai business empowerment", "evalueserve", "review new verticals"]},
     {"id": "group", "category": "Group / Team Meetings", "any": ["office hours", "monthly fr risk review"]},
     {"id": "project", "category": "Project Meetings / Standups", "any": ["supply manager migration", "ai action hub sync", "mcp poc demo", "issue list ui"]},
     {"id": "one-on-one", "category": "1-on-1s", "any": ["zac-casey"]}
