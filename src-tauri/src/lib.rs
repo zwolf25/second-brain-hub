@@ -575,6 +575,12 @@ fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Re
 }
 
 /// Called after the VoC deep link opens; badge only.
+/// The one category whose transcripts offer VoC actions.
+#[tauri::command]
+fn get_voc_category(state: State<Arc<AppState>>) -> String {
+    load_rules(&state).voc_category
+}
+
 #[tauri::command]
 fn mark_transcripts_voc(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
     let _guard = state.transcripts_scan.lock().unwrap();
@@ -905,6 +911,7 @@ pub fn run() {
             set_autostart,
             mark_transcripts_logged,
             get_transcript_categories,
+            get_voc_category,
             mark_transcripts_voc,
             set_transcripts_voc_skip,
             set_transcript_category,

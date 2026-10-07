@@ -279,8 +279,13 @@ const bulkCatSelect = document.querySelector("#transcripts-bulk-cat");
 const categoryOptions = (current) =>
   transcriptCategories.map((c) => `<option${c === current ? " selected" : ""}>${escapeHtml(c)}</option>`).join("");
 
+// VoC actions only apply to transcripts in the VoC category (the one the categorizer's clear-signal gate fills).
+let vocCategory = "";
+const isVoc = (r) => r.category === vocCategory;
+
 function renderSelectionBar() {
   const n = selectedTranscripts.size;
+  document.querySelector("#transcripts-voc-sel").classList.toggle("hidden", !transcriptRows.some((r) => selectedTranscripts.has(r.vtt) && isVoc(r)));
   transcriptsBar.classList.toggle("hidden", n === 0);
   document.querySelector("#transcripts-selected").textContent = `${n} selected`;
   // All selected already hidden -> the button unhides; any visible one in the mix -> it hides.
@@ -353,10 +358,11 @@ async function loadTranscripts() {
     document.querySelector("#transcripts-privacy").classList.add("hidden");
     return;
   }
-  [transcriptRows, transcriptCategories, auditStatus] = await Promise.all([
+  [transcriptRows, transcriptCategories, auditStatus, vocCategory] = await Promise.all([
     invoke("get_transcripts"),
     invoke("get_transcript_categories"),
     invoke("get_audit_status"),
+    invoke("get_voc_category"),
   ]);
   bulkCatSelect.innerHTML = categoryOptions("");
   document.querySelector("#transcripts-privacy").classList.toggle("hidden", !auditStatus.enabled);
@@ -443,8 +449,8 @@ async function logitTranscripts(vtts) {
 // Interactive: voc-library-ingest shows its batch summary and waits for approval before writing to the shared
 // vault. Badge only (the deep link can't confirm completion); the row stays visible and eligible for log-it.
 async function vocTranscripts(vtts) {
-  const rows = transcriptRows.filter((r) => vtts.includes(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
-  if (!rows.length) return transcriptsNotice("Nothing to send: select converted, non-duplicate transcripts.");
+  const rows = transcriptRows.filter((r) => vtts.includes(r.vtt) && isVoc(r) && !r.duplicate_of && r.md_exists && r.open_path);
+  if (!rows.length) return transcriptsNotice("Nothing to send: select converted, non-duplicate transcripts in the VoC category.");
   const batch = rows.slice(0, LOGIT_MAX);
   const files = batch.map((r) => r.open_path);
   const prompt =
@@ -479,8 +485,11 @@ transcriptsList.addEventListener("click", (e) => {
   const r = transcriptRows.find((x) => x.vtt === vtt);
   if (!r) return;
   const items = [["open", "Open"]];
-  if (!r.duplicate_of)
-    items.push(["move", "Move…"], ["logit", "Run log-it"], ["voc", "Process as VoC"], [r.voc_skip ? "vocallow" : "vocskip", r.voc_skip ? "Allow auto VoC" : "Don't process as VoC"], r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
+  if (!r.duplicate_of) {
+    items.push(["move", "Move…"], ["logit", "Run log-it"]);
+    if (isVoc(r)) items.push(["voc", "Process as VoC"], [r.voc_skip ? "vocallow" : "vocskip", r.voc_skip ? "Allow auto VoC" : "Don't process as VoC"]);
+    items.push(r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
+  }
   rowMenu.innerHTML = items.map(([act, label]) => `<button role="menuitem" data-act="${act}">${label}</button>`).join("");
   rowMenu.dataset.vtt = vtt;
   const box = btn.getBoundingClientRect();
