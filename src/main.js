@@ -332,7 +332,7 @@ function renderTranscripts() {
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
         ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
-        ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">No VoC</span>' : ""}
+        ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">Skip Auto VoC</span>' : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
         <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
         <button class="t-actions topbar-btn" aria-label="Actions" aria-haspopup="menu" title="Actions">⋯</button>
@@ -460,7 +460,7 @@ async function vocTranscripts(vtts) {
   try {
     await openUrl(`claude://code/new?q=${encodeURIComponent(prompt)}`);
   } catch (err) {
-    return messageDialog(`Couldn't open Claude Desktop:\n${err}`, { title: "Process as VoC", kind: "error" });
+    return messageDialog(`Couldn't open Claude Desktop:\n${err}`, { title: "Process VoC", kind: "error" });
   }
   batch.forEach((r) => selectedTranscripts.delete(r.vtt));
   await invoke("mark_transcripts_voc", { vtts: batch.map((r) => r.vtt) });
@@ -487,7 +487,9 @@ transcriptsList.addEventListener("click", (e) => {
   const items = [["open", "Open"]];
   if (!r.duplicate_of) {
     items.push(["move", "Move…"], ["logit", "Run log-it"]);
-    if (isVoc(r)) items.push(["voc", "Process as VoC"], [r.voc_skip ? "vocallow" : "vocskip", r.voc_skip ? "Allow auto VoC" : "Don't process as VoC"]);
+    if (isVoc(r)) items.push(["voc", "Process VoC"]);
+    // Skip/Queue only mean something once an automatic VoC rule is on.
+    if (isVoc(r) && autoRules.some((x) => x.enabled && x.action === "voc")) items.push(r.voc_skip ? ["vocallow", "Queue for Auto VoC"] : ["vocskip", "Skip Auto VoC"]);
     items.push(r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
   }
   rowMenu.innerHTML = items.map(([act, label]) => `<button role="menuitem" data-act="${act}">${label}</button>`).join("");

@@ -229,7 +229,7 @@
           <button id="transcripts-bulk-apply" class="topbar-btn">Set category</button>
           <button id="transcripts-move-sel" class="topbar-btn" title="Move the converted markdown files to a folder you choose">Move…</button>
           <button id="transcripts-hide-sel" class="topbar-btn">Hide</button>
-          <button id="transcripts-voc-sel" class="topbar-btn" title="Opens Claude Desktop and runs /voc-library-ingest on the selected transcripts. Copies the transcript, including attendee names, into the shared vault (asks you to approve first; uses tokens)">Process as VoC</button>
+          <button id="transcripts-voc-sel" class="topbar-btn" title="Opens Claude Desktop and runs /voc-library-ingest on the selected transcripts. Copies the transcript, including attendee names, into the shared vault (asks you to approve first; uses tokens)">Process VoC</button>
           <button id="transcripts-logit-sel" class="topbar-btn" title="Opens Claude Desktop and runs /log-it on each selected transcript (uses tokens)">Run log-it</button>
           <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
         </div>
@@ -247,7 +247,7 @@
             <select id="rule-action">
               <option value="move">Move to a folder</option>
               <option value="log-it">Log-it (queued for the transcript-log skill)</option>
-              <option value="voc" disabled>Process as VoC (coming soon)</option>
+              <option value="voc" disabled>Process VoC (coming soon)</option>
             </select>
           </label>
           <div id="rule-dest-field" class="modal-field">Destination folder
