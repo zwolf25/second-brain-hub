@@ -574,11 +574,20 @@ async function openRuleModal(index) {
   rf.dest.textContent = r.dest ?? "no folder chosen";
   rf.mode.value = r.mode;
   rf.days.value = r.after_days;
-  rf.cats.innerHTML = cats
-    .map((c) => `<label><input type="checkbox" value="${escapeHtml(c)}"${r.categories.includes(c) ? " checked" : ""} /> ${escapeHtml(c)}</label>`)
-    .join("");
+  rf.allCats = cats;
+  rf.vocCat = await invoke("get_voc_category");
+  renderRuleCats(r.categories);
   ruleModal.classList.remove("hidden");
   refreshRulePreview();
+}
+// A VoC rule can only target the VoC category, so it is the only choice and the include/except switch is hidden.
+function renderRuleCats(checked) {
+  const voc = rf.action.value === "voc";
+  if (voc) rf.mode.value = "include";
+  rf.mode.parentElement.classList.toggle("hidden", voc);
+  rf.cats.innerHTML = (voc ? [rf.vocCat] : rf.allCats)
+    .map((c) => `<label><input type="checkbox" value="${escapeHtml(c)}"${voc || checked.includes(c) ? " checked" : ""} /> ${escapeHtml(c)}</label>`)
+    .join("");
 }
 const closeRuleModal = () => ruleModal.classList.add("hidden");
 document.querySelector("#add-rule-btn").addEventListener("click", () => openRuleModal(-1));
@@ -593,6 +602,7 @@ document.querySelector("#rule-dest-btn").addEventListener("click", async () => {
   refreshRulePreview();
 });
 rf.action.addEventListener("change", () => {
+  renderRuleCats([...rf.cats.querySelectorAll("input:checked")].map((i) => i.value));
   rf.destField.classList.toggle("hidden", rf.action.value !== "move");
   refreshRulePreview();
 });
