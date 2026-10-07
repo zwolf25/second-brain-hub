@@ -348,6 +348,7 @@ function renderTranscripts() {
 async function loadTranscripts() {
   const config = await invoke("get_config");
   const configured = !!config.transcripts_path;
+  autoRules = config.auto_rules ?? [];
   transcriptsEmpty.classList.toggle("hidden", configured);
   transcriptsList.classList.toggle("hidden", !configured);
   transcriptsNotNowBtn.classList.toggle("hidden", !!config.transcripts_dismissed);
