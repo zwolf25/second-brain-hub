@@ -620,10 +620,6 @@ fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config
     }
     {
         let mut cfg = state.config.lock().unwrap();
-        // Server-side gate: nothing copies transcripts to the shared vault unless the consent screen was confirmed.
-        if !cfg.voc_consent && rules.iter().any(|r| r.action == "voc" && r.enabled) {
-            return Err("Automatic VoC needs the consent confirmation first.".into());
-        }
         cfg.auto_rules = rules;
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
