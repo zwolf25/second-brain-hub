@@ -313,6 +313,11 @@ fn sync_log_bridge(state: &AppState) {
             tracing::warn!("write log-it queue: {e:#}");
         }
     }
+    if rules.iter().any(|r| r.action == "voc") || bridge.join("voc-queue.json").exists() {
+        if let Err(e) = transcripts::write_voc_queue(&state.transcripts_dir, &rules, &bridge) {
+            tracing::warn!("write voc queue: {e:#}");
+        }
+    }
 }
 
 fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
@@ -575,6 +580,14 @@ fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Re
 }
 
 /// Called after the VoC deep link opens; badge only.
+/// Recorded once the user confirms the automatic-VoC consent screen.
+#[tauri::command]
+fn set_voc_consent(state: State<Arc<AppState>>, on: bool) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.voc_consent = on;
+    config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
+}
+
 /// The one category whose transcripts offer VoC actions.
 #[tauri::command]
 fn get_voc_category(state: State<Arc<AppState>>) -> String {
@@ -602,11 +615,15 @@ fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String
 /// Saves the whole ordered rule list and applies it once right away.
 #[tauri::command]
 fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
-    if let Some(bad) = rules.iter().find(|r| !["move", "log-it"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none())) {
+    if let Some(bad) = rules.iter().find(|r| !["move", "log-it", "voc"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none())) {
         return Err(format!("Rule {} is incomplete (a move rule needs a folder).", bad.id));
     }
     {
         let mut cfg = state.config.lock().unwrap();
+        // Server-side gate: nothing copies transcripts to the shared vault unless the consent screen was confirmed.
+        if !cfg.voc_consent && rules.iter().any(|r| r.action == "voc" && r.enabled) {
+            return Err("Automatic VoC needs the consent confirmation first.".into());
+        }
         cfg.auto_rules = rules;
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
@@ -912,6 +929,7 @@ pub fn run() {
             mark_transcripts_logged,
             get_transcript_categories,
             get_voc_category,
+            set_voc_consent,
             mark_transcripts_voc,
             set_transcripts_voc_skip,
             set_transcript_category,

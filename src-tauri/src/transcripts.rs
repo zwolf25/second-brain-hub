@@ -689,12 +689,16 @@ fn claiming_rule(rules: &[crate::config::AutoRule], e: &Entry, today: u64, previ
 /// Files `rules[idx]` would move now (the dry-run count shown before saving); earlier rules win overlaps.
 pub fn auto_move_preview(out: &Path, rules: &[crate::config::AutoRule], idx: usize) -> usize {
     let today = crate::audit::days_since_epoch(&today_utc());
-    let log_it = rules.get(idx).is_some_and(|r| r.action == "log-it");
+    let action = rules.get(idx).map_or("", |r| r.action.as_str());
     load_state(out)
         .entries
         .values()
         .filter(|e| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()))
-        .filter(|e| if log_it { !e.logged && !e.hidden && in_scope(&rules[idx], e, today) } else { claiming_rule(rules, e, today, Some(idx)) == Some(idx) })
+        .filter(|e| match action {
+            "log-it" => !e.logged && !e.hidden && in_scope(&rules[idx], e, today),
+            "voc" => voc_eligible(&rules[idx], e, today),
+            _ => claiming_rule(rules, e, today, Some(idx)) == Some(idx),
+        })
         .count()
 }
 
@@ -723,20 +727,41 @@ struct QueueItem<'a> {
 /// The skill only reads it; all category/age filtering stays here. Returns the queue length.
 pub fn write_log_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &Path) -> Result<usize> {
     let today = crate::audit::days_since_epoch(&today_utc());
-    let state = load_state(out);
     let log_rules: Vec<_> = rules.iter().filter(|r| r.action == "log-it" && r.enabled).collect();
+    write_queue(out, bridge, "log-queue.json", |e| !e.logged && !e.hidden && log_rules.iter().any(|r| in_scope(r, e, today)), None)
+}
+
+/// VoC runs only on rows the categorizer filed under a rule's categories, never `Other`, and never ones the user
+/// skipped or already sent. Hidden/logged state is irrelevant: VoC and log-it are independent.
+fn voc_eligible(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
+    !e.voc_ingested && !e.voc_skip && e.category != "Other" && in_scope(rule, e, today)
+}
+
+/// Writes `voc-queue.json`, same shape as the log-it queue plus the per-run cap the skill must honor.
+pub fn write_voc_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &Path) -> Result<usize> {
+    let today = crate::audit::days_since_epoch(&today_utc());
+    let voc_rules: Vec<_> = rules.iter().filter(|r| r.action == "voc" && r.enabled).collect();
+    write_queue(out, bridge, "voc-queue.json", |e| voc_rules.iter().any(|r| voc_eligible(r, e, today)), Some(VOC_MAX_PER_RUN))
+}
+
+pub const VOC_MAX_PER_RUN: usize = 5;
+
+fn write_queue(out: &Path, bridge: &Path, file: &str, wanted: impl Fn(&Entry) -> bool, max_per_run: Option<usize>) -> Result<usize> {
+    let state = load_state(out);
     let items: Vec<QueueItem> = state
         .entries
         .iter()
-        .filter(|(_, e)| e.duplicate_of.is_none() && !e.logged && !e.hidden)
-        .filter(|(_, e)| e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()))
-        .filter(|(_, e)| log_rules.iter().any(|r| in_scope(r, e, today)))
+        .filter(|(_, e)| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()) && wanted(e))
         .map(|(name, e)| QueueItem { vtt: name, path: e.md_path.as_deref().unwrap_or(""), title: &e.title, date: &e.date, category: &e.category })
         .collect();
     std::fs::create_dir_all(bridge).context("creating bridge dir")?;
-    let tmp = bridge.join("log-queue.json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&serde_json::json!({ "generated": today_utc(), "items": items }))?)?;
-    std::fs::rename(&tmp, bridge.join("log-queue.json")).context("writing log-queue.json")?;
+    let tmp = bridge.join(format!("{file}.tmp"));
+    let mut doc = serde_json::json!({ "generated": today_utc(), "items": items });
+    if let Some(m) = max_per_run {
+        doc["max_per_run"] = m.into();
+    }
+    std::fs::write(&tmp, serde_json::to_string_pretty(&doc)?)?;
+    std::fs::rename(&tmp, bridge.join(file)).with_context(|| format!("writing {file}"))?;
     Ok(items.len())
 }
 
@@ -745,23 +770,30 @@ pub fn write_log_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &P
 pub fn ingest_logged(out: &Path, bridge: &Path) -> Result<usize> {
     let dir = bridge.join("logged");
     let Ok(read) = std::fs::read_dir(&dir) else { return Ok(0) };
-    let mut vtts = Vec::new();
+    let (mut logged, mut voc) = (Vec::new(), Vec::new());
     let mut done = Vec::new();
     for f in read.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|x| x == "json")) {
-        let Some(v) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|j| j["vtt"].as_str().map(String::from)) else {
+        let Some(j) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else {
             continue; // unreadable or half-synced: leave it for the next scan
         };
-        vtts.push(v);
+        let Some(v) = j["vtt"].as_str().map(String::from) else { continue };
+        // `kind` is "log-it" (default) or "voc": a VoC receipt only sets the VoC badge, it never hides.
+        if j["kind"].as_str() == Some("voc") { voc.push(v) } else { logged.push(v) }
         done.push(f);
     }
-    if vtts.is_empty() {
+    if done.is_empty() {
         return Ok(0);
     }
-    mark_logged(out, &vtts)?;
+    if !logged.is_empty() {
+        mark_logged(out, &logged)?;
+    }
+    if !voc.is_empty() {
+        mark_voc(out, &voc)?;
+    }
     done.iter().for_each(|f| {
         let _ = std::fs::remove_file(f);
     });
-    Ok(vtts.len())
+    Ok(done.len())
 }
 
 /// What the Transcripts page shows per row.
@@ -1055,6 +1087,35 @@ mod tests {
         assert!(e.logged && e.hidden && e.hidden_reason.as_deref() == Some("logged"));
         assert!(!bridge.join("logged/1-1.json").exists() && bridge.join("logged/1-2.json").exists());
         assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 0);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn voc_queue_skips_other_skipped_and_ingested() {
+        let d = std::env::temp_dir().join(format!("tr-vocq-{}", std::process::id()));
+        let (src, out, bridge) = (d.join("src"), d.join("out"), d.join("bridge"));
+        std::fs::create_dir_all(&src).unwrap();
+        let vtt = |b: &str| format!("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>{b}</v>\n");
+        let names = ["Weekly Release Management-20260101_100000-Meeting Recording.vtt", "Kaizen Review-20260102_100000-Meeting Recording.vtt", "Kaizen Review-20260103_100000-Meeting Recording.vtt"];
+        for (i, n) in names.iter().enumerate() {
+            std::fs::write(src.join(n), vtt(&format!("body {i} unique words here"))).unwrap();
+        }
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let rule = crate::config::AutoRule { id: "v".into(), action: "voc".into(), enabled: true, dest: None, mode: "exclude".into(), categories: vec![], after_days: 0 };
+        let rules = [rule];
+        let n0 = write_voc_queue(&out, &rules, &bridge).unwrap();
+        let q: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(bridge.join("voc-queue.json")).unwrap()).unwrap();
+        assert_eq!(q["max_per_run"], VOC_MAX_PER_RUN);
+        assert!(q["items"].as_array().unwrap().iter().all(|i| i["category"] != "Other"));
+        set_voc_skip(&out, &[names[0].to_string()], true).unwrap();
+        mark_voc(&out, &[names[1].to_string()]).unwrap();
+        assert!(write_voc_queue(&out, &rules, &bridge).unwrap() < n0, "skipped and ingested rows drop out");
+        // a voc receipt sets the badge without hiding
+        std::fs::create_dir_all(bridge.join("logged")).unwrap();
+        std::fs::write(bridge.join("logged/1-1.json"), format!(r#"{{"vtt":"{}","kind":"voc"}}"#, names[2])).unwrap();
+        assert_eq!(ingest_logged(&out, &bridge).unwrap(), 1);
+        let e = &load_state(&out).entries[names[2]];
+        assert!(e.voc_ingested && !e.hidden && !e.logged);
         std::fs::remove_dir_all(&d).ok();
     }
 

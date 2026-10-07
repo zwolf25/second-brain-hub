@@ -22,6 +22,9 @@ pub struct AppConfig {
     /// Start at login is turned on once when transcripts are first set up; after that it is the user's choice.
     #[serde(default)]
     pub autostart_default_applied: bool,
+    /// The user confirmed that automatic VoC copies transcripts (with attendee names) into the shared vault.
+    #[serde(default)]
+    pub voc_consent: bool,
     /// Ordered rules run at the end of each transcripts scan; the first matching rule claims a file.
     #[serde(default)]
     pub auto_rules: Vec<AutoRule>,

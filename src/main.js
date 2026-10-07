@@ -134,6 +134,7 @@ const transcriptsSection = makePathSection({
     showTranscriptsPageBox.checked = !config.hide_transcripts_page;
     autostartBox.checked = await invoke("get_autostart");
     autoRules = config.auto_rules ?? [];
+  vocConsent = !!config.voc_consent;
     renderAutoRules();
     document.querySelector("#add-rule-btn").disabled = !config.transcripts_path;
     applyTranscriptsNav(config);
@@ -349,6 +350,7 @@ async function loadTranscripts() {
   const config = await invoke("get_config");
   const configured = !!config.transcripts_path;
   autoRules = config.auto_rules ?? [];
+  vocConsent = !!config.voc_consent;
   transcriptsEmpty.classList.toggle("hidden", configured);
   transcriptsList.classList.toggle("hidden", !configured);
   transcriptsNotNowBtn.classList.toggle("hidden", !!config.transcripts_dismissed);
@@ -531,7 +533,17 @@ const rf = {
   enabled: true,
   id: "",
 };
+let vocConsent = false;
 const saveRules = async (rules) => {
+  if (!vocConsent && rules.some((r) => r.enabled && r.action === "voc")) {
+    const ok = await confirmDialog(
+      "Automatic VoC copies matching transcripts, including attendee names, into the shared VoC library that your team can read. Nothing outside the VoC category is processed, and up to 5 run per pass.\n\nTurn it on?",
+      { title: "Automatic VoC", okLabel: "Turn on", cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+    await invoke("set_voc_consent", { on: true });
+    vocConsent = true;
+  }
   await invoke("set_auto_rules", { rules });
   autoRules = rules;
   renderAutoRules();
@@ -551,7 +563,7 @@ async function refreshRulePreview() {
   const list = rf.editing >= 0 ? autoRules.map((r, i) => (i === idx ? rule : r)) : [...autoRules, rule];
   const n = rule.action === "move" && !rule.dest ? null : await invoke("preview_auto_rule", { rules: list, idx });
   rf.preview.textContent =
-    n === null ? "Choose a folder first." : `${n} existing file(s) would ${rule.action === "move" ? "move" : "be queued for log-it"} when this rule is on.`;
+    n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be queued for VoC" }[rule.action] ?? "be queued for log-it"} when this rule is on.`;
 }
 async function openRuleModal(index) {
   const cats = await invoke("get_transcript_categories");
@@ -610,7 +622,7 @@ function renderAutoRules() {
     row.className = "auto-rule-row";
     row.innerHTML = `
       <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
-      <span class="auto-rule-text">${r.action === "log-it" ? `<strong>Log-it</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Process VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Log-it</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
       <button class="topbar-btn rule-edit">Edit</button>
       <button class="topbar-btn rule-del">Delete</button>`;
     row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));
