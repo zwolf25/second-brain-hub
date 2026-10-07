@@ -580,11 +580,12 @@ async function openRuleModal(index) {
   ruleModal.classList.remove("hidden");
   refreshRulePreview();
 }
-// A VoC rule can only target the VoC category, so it is the only choice and the include/except switch is hidden.
+// A VoC rule can only target the VoC category, so there is nothing to choose and the whole picker is hidden.
 function renderRuleCats(checked) {
   const voc = rf.action.value === "voc";
   if (voc) rf.mode.value = "include";
   rf.mode.parentElement.classList.toggle("hidden", voc);
+  rf.cats.classList.toggle("hidden", voc); // one VoC category: nothing to choose (checked box stays in the DOM for the save)
   rf.cats.innerHTML = (voc ? [rf.vocCat] : rf.allCats)
     .map((c) => `<label><input type="checkbox" value="${escapeHtml(c)}"${voc || checked.includes(c) ? " checked" : ""} /> ${escapeHtml(c)}</label>`)
     .join("");
