@@ -326,6 +326,8 @@ function renderTranscripts() {
         <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
+        ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
+        ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">No VoC</span>' : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
         <select class="t-cat" title="${escapeHtml(r.category_source)}"${r.duplicate_of ? " disabled" : ""}>${categoryOptions(r.category)}</select>
         <button class="t-actions topbar-btn" aria-label="Actions" aria-haspopup="menu" title="Actions">⋯</button>
@@ -438,7 +440,30 @@ async function logitTranscripts(vtts) {
   transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to log-it; select the rest and run again.` : `Sent ${batch.length} to log-it.`);
 }
 
+// Interactive: voc-library-ingest shows its batch summary and waits for approval before writing to the shared
+// vault. Badge only (the deep link can't confirm completion); the row stays visible and eligible for log-it.
+async function vocTranscripts(vtts) {
+  const rows = transcriptRows.filter((r) => vtts.includes(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
+  if (!rows.length) return transcriptsNotice("Nothing to send: select converted, non-duplicate transcripts.");
+  const batch = rows.slice(0, LOGIT_MAX);
+  const files = batch.map((r) => r.open_path);
+  const prompt =
+    files.length === 1
+      ? `/voc-library-ingest ${files[0]}`
+      : `Run /voc-library-ingest on these transcript files as one batch (these are Teams transcripts already converted to markdown):\n${files.join("\n")}`;
+  try {
+    await openUrl(`claude://code/new?q=${encodeURIComponent(prompt)}`);
+  } catch (err) {
+    return messageDialog(`Couldn't open Claude Desktop:\n${err}`, { title: "Process as VoC", kind: "error" });
+  }
+  batch.forEach((r) => selectedTranscripts.delete(r.vtt));
+  await invoke("mark_transcripts_voc", { vtts: batch.map((r) => r.vtt) });
+  await loadTranscripts();
+  transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to VoC; select the rest and run again.` : `Sent ${batch.length} to VoC.`);
+}
+
 const selectedList = () => [...selectedTranscripts];
+document.querySelector("#transcripts-voc-sel").addEventListener("click", () => vocTranscripts(selectedList()));
 document.querySelector("#transcripts-move-sel").addEventListener("click", () => moveTranscripts(selectedList()));
 document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), !selectionAllHidden()));
 document.querySelector("#transcripts-logit-sel").addEventListener("click", () => logitTranscripts(selectedList()));
@@ -454,7 +479,8 @@ transcriptsList.addEventListener("click", (e) => {
   const r = transcriptRows.find((x) => x.vtt === vtt);
   if (!r) return;
   const items = [["open", "Open"]];
-  if (!r.duplicate_of) items.push(["move", "Move…"], ["logit", "Run log-it"], r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
+  if (!r.duplicate_of)
+    items.push(["move", "Move…"], ["logit", "Run log-it"], ["voc", "Process as VoC"], [r.voc_skip ? "vocallow" : "vocskip", r.voc_skip ? "Allow auto VoC" : "Don't process as VoC"], r.hidden ? ["unhide", "Unhide"] : ["hide", "Hide"]);
   rowMenu.innerHTML = items.map(([act, label]) => `<button role="menuitem" data-act="${act}">${label}</button>`).join("");
   rowMenu.dataset.vtt = vtt;
   const box = btn.getBoundingClientRect();
@@ -470,6 +496,8 @@ rowMenu.addEventListener("click", (e) => {
   if (act === "open") openTranscript(vtt);
   else if (act === "move") moveTranscripts([vtt]);
   else if (act === "logit") logitTranscripts([vtt]);
+  else if (act === "voc") vocTranscripts([vtt]);
+  else if (act === "vocskip" || act === "vocallow") invoke("set_transcripts_voc_skip", { vtts: [vtt], skip: act === "vocskip" }).then(loadTranscripts);
   else hideTranscripts([vtt], act === "hide");
 });
 document.addEventListener("click", closeRowMenu);

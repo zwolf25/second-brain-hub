@@ -574,6 +574,19 @@ fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Re
     transcripts::mark_logged(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
 }
 
+/// Called after the VoC deep link opens; badge only.
+#[tauri::command]
+fn mark_transcripts_voc(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::mark_voc(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_transcripts_voc_skip(state: State<Arc<AppState>>, vtts: Vec<String>, skip: bool) -> Result<(), String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::set_voc_skip(&state.transcripts_dir, &vtts, skip).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String) -> Result<transcripts::MoveReport, String> {
     let _guard = state.transcripts_scan.lock().unwrap();
@@ -892,6 +905,8 @@ pub fn run() {
             set_autostart,
             mark_transcripts_logged,
             get_transcript_categories,
+            mark_transcripts_voc,
+            set_transcripts_voc_skip,
             set_transcript_category,
             get_audit_status,
             get_raw_count,

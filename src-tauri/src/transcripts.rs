@@ -209,6 +209,12 @@ pub struct Entry {
     /// `duplicate_of` was set by the near-duplicate guard (>= NEAR_DUP_MIN shingle overlap), not an exact hash match.
     #[serde(default)]
     pub near: bool,
+    /// Sent to `voc-library-ingest`. Set at launch (a deep link can't confirm); never hides the row.
+    #[serde(default)]
+    pub voc_ingested: bool,
+    /// "Don't process as VoC": excluded from any automatic VoC run.
+    #[serde(default)]
+    pub voc_skip: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -488,6 +494,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                 if let Some(old) = state.entries.get(&name) {
                     entry.md_path = old.md_path.clone();
                     (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone());
+                    (entry.voc_ingested, entry.voc_skip) = (old.voc_ingested, old.voc_skip);
                     reconvert.insert(name.clone());
                 }
                 if entry.category == "Other" && entry.category_source == "fallback" {
@@ -571,6 +578,19 @@ pub fn mark_logged(out: &Path, vtts: &[String]) -> Result<()> {
     for e in state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).map(|(_, e)| e) {
         (e.logged, e.hidden, e.hidden_reason) = (true, true, Some("logged".into()));
     }
+    save_state(out, &state)
+}
+
+/// Marks transcripts as sent to VoC (badge only; they stay visible and eligible for log-it).
+pub fn mark_voc(out: &Path, vtts: &[String]) -> Result<()> {
+    let mut state = load_state(out);
+    state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).for_each(|(_, e)| e.voc_ingested = true);
+    save_state(out, &state)
+}
+
+pub fn set_voc_skip(out: &Path, vtts: &[String], skip: bool) -> Result<()> {
+    let mut state = load_state(out);
+    state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).for_each(|(_, e)| e.voc_skip = skip);
     save_state(out, &state)
 }
 
@@ -764,6 +784,8 @@ pub struct Row {
     pub md_exists: bool,
     pub hidden: bool,
     pub hidden_reason: Option<String>,
+    pub voc_ingested: bool,
+    pub voc_skip: bool,
 }
 
 pub fn rows(out: &Path) -> Vec<Row> {
@@ -792,6 +814,8 @@ pub fn rows(out: &Path) -> Vec<Row> {
                 open_path: open,
                 hidden: e.hidden,
                 hidden_reason: e.hidden_reason.clone(),
+                voc_ingested: e.voc_ingested,
+                voc_skip: e.voc_skip,
             }
         })
         .collect();
@@ -1076,6 +1100,27 @@ mod tests {
         std::fs::write(src.join("New_2026-10-01_Transcript.vtt"), vtt("B", "fresh")).unwrap();
         let third = scan(&src, &out, &rules).unwrap();
         assert_eq!((third.processed, third.converted), (1, 1));
+    }
+
+    #[test]
+    fn voc_flags_survive_rescan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, out) = (tmp.path().join("src"), tmp.path().join("out"));
+        std::fs::create_dir(&src).unwrap();
+        let name = "Interview_2026-09-03_Transcript.vtt";
+        std::fs::write(src.join(name), vtt("A", "first")).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let v = vec![name.to_string()];
+        mark_voc(&out, &v).unwrap();
+        set_voc_skip(&out, &v, true).unwrap();
+        std::fs::write(src.join(name), vtt("A", "second")).unwrap();
+        let bumped = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options().write(true).open(src.join(name)).unwrap().set_modified(bumped).unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let r = rows(&out).into_iter().next().unwrap();
+        assert!(r.voc_ingested && r.voc_skip && !r.hidden, "VoC flags persist and never hide");
+        set_voc_skip(&out, &v, false).unwrap();
+        assert!(!rows(&out)[0].voc_skip);
     }
 
     #[test]
