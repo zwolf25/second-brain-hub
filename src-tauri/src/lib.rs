@@ -525,7 +525,9 @@ fn rescan_transcripts(app: AppHandle) {
 
 #[tauri::command]
 fn get_transcript_categories(state: State<Arc<AppState>>) -> Vec<String> {
-    load_rules(&state).categories
+    let mut cats = load_rules(&state).categories;
+    cats.sort_by_key(|c| c.to_lowercase());
+    cats
 }
 
 /// Manual correction for one or many transcripts. Always applied locally (and remembered for
