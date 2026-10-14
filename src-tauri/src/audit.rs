@@ -207,6 +207,7 @@ mod tests {
             category: "Other".into(),
             category_source: "fallback".into(),
             confidence: "low".into(),
+            header: Some(crate::transcripts::Header { summary: Some("Secret Summary".into()), actions: vec!["Secret Action".into()], ..Default::default() }),
             ..Default::default()
         }
     }
@@ -223,6 +224,7 @@ mod tests {
         let ev = a.event("manual_change", &entry(), Some("Other"), Some("Kaizen Meetings"), Some("fallback"));
         let json = serde_json::to_string(&ev).unwrap();
         assert!(!json.contains("Secret Name") && !json.contains("Other Person"), "no attendee names");
+        assert!(!json.contains("Secret Summary") && !json.contains("Secret Action"), "no AI header text");
         assert_eq!((ev.speaker_bucket, ev.duration_bucket, ev.user.as_str()), ("2", "30-60", "zac-wolf"));
         assert_eq!(ev.title_norm, "acme weekly");
         let auto = serde_json::to_string(&a.event("auto_other", &entry(), None, None, None)).unwrap();
