@@ -666,9 +666,24 @@ button:hover {
   min-width: 0;
 }
 
+.t-expand,
+.t-expand-gap {
+  flex: none;
+  width: 1em;
+}
+
 .t-expand {
-  padding: 0 0.35em;
-  font-size: 0.9em;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #777;
+  font-size: 0.95em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.t-expand:hover {
+  color: #396cd8;
 }
 
 .t-detail {

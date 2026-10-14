@@ -348,8 +348,8 @@ function renderTranscripts() {
     const meta = [r.date, `${r.speakers} speaker${r.speakers === 1 ? "" : "s"}`, `${r.duration_min} min`, `${r.words.toLocaleString()} words`];
     li.innerHTML = `
       <div class="transcript-head">
-        ${r.header ? `<button class="t-expand topbar-btn" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : ""}
         <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
+        ${r.header ? `<button class="t-expand" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : '<span class="t-expand-gap"></span>'}
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
         ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
