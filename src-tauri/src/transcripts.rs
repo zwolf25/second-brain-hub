@@ -273,6 +273,11 @@ pub fn title_and_date(file_name: &str) -> (String, Option<String>) {
     let stem = file_name.rsplit_once('.').map_or(file_name, |(s, _)| s);
     let lower = stem.to_lowercase();
     let stem = if lower.ends_with("_transcript") { &stem[..stem.len() - "_transcript".len()] } else { stem };
+    // Newer downloads carry a time too: `Title_2026-10-13_16-39_Transcript`.
+    let stem = match stem.rsplit_once('_') {
+        Some((t, hm)) if is_time(hm) && t.rsplit_once('_').is_some_and(|(_, d)| is_date(d)) => t,
+        _ => stem,
+    };
     let (stem, date) = match stem.rsplit_once('_') {
         Some((t, d)) if is_date(d) => (t, Some(d.to_string())),
         _ => (stem, None),
@@ -280,6 +285,11 @@ pub fn title_and_date(file_name: &str) -> (String, Option<String>) {
     let t = stem.trim();
     let t = if t.to_lowercase().starts_with("following-") { &t[10..] } else { t };
     (t.split_whitespace().collect::<Vec<_>>().join(" "), date)
+}
+
+fn is_time(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 5 && b.iter().enumerate().all(|(i, c)| if i == 2 { *c == b'-' } else { c.is_ascii_digit() })
 }
 
 fn is_date(s: &str) -> bool {
@@ -612,7 +622,10 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
     for path in vtt_files(src) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let mtime = mtime_secs(&path);
-        let migrating = state.entries.get(&name).is_some_and(|e| e.vtt_mtime >= mtime && !e.header_checked);
+        // Unchanged source, but state predates header parsing or the `_HH-MM` filename fix.
+        let migrating = state.entries.get(&name).is_some_and(|e| {
+            e.vtt_mtime >= mtime && (!e.header_checked || title_and_date(&name) != (e.title.clone(), e.date.clone()))
+        });
         if !migrating && state.entries.get(&name).is_some_and(|e| e.vtt_mtime >= mtime) {
             continue;
         }
@@ -624,7 +637,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                     entry.md_path = old.md_path.clone();
                     (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone());
                     (entry.voc_ingested, entry.voc_skip) = (old.voc_ingested, old.voc_skip);
-                    if !migrating || entry.header.is_some() {
+                    if !migrating || entry.header.is_some() || old.title != entry.title {
                         reconvert.insert(name.clone());
                     }
                 }
@@ -1059,6 +1072,13 @@ mod tests {
         // Prose that merely contains a colon is not split when it isn't the dominant shape.
         let prose = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nnote: this is fine\n\n00:00:03.000 --> 00:00:04.000\nno speaker here\n\n00:00:05.000 --> 00:00:06.000\nor here\n";
         assert!(parse_cues(prose).iter().all(|c| c.speaker.is_none()));
+    }
+
+    #[test]
+    fn filename_with_time_keeps_date_and_clean_title() {
+        assert_eq!(title_and_date("Subscriber Usage Data for Second Brain_2026-10-13_16-39_Transcript.vtt"), ("Subscriber Usage Data for Second Brain".into(), Some("2026-10-13".into())));
+        assert_eq!(title_and_date("Following- Claude Office Hours_2026-08-04_15-32_Transcript.vtt"), ("Claude Office Hours".into(), Some("2026-08-04".into())));
+        assert_eq!(title_and_date("Innovation Weekly Sync_2026-10-02_Transcript.vtt"), ("Innovation Weekly Sync".into(), Some("2026-10-02".into())));
     }
 
     #[test]
