@@ -666,6 +666,46 @@ button:hover {
   min-width: 0;
 }
 
+.t-expand {
+  padding: 0 0.35em;
+  font-size: 0.9em;
+}
+
+.t-detail {
+  margin: 0.5em 0 0.2em 1.6em;
+  padding: 0.5em 0.8em;
+  border-left: 3px solid #c9d4f2;
+  font-size: 0.85em;
+  user-select: text;
+  cursor: text;
+}
+
+.t-detail h4 {
+  margin: 0.6em 0 0.2em;
+  font-size: 0.9em;
+  color: #555;
+}
+
+.t-detail h4:first-child {
+  margin-top: 0;
+}
+
+.t-detail p,
+.t-detail ol,
+.t-detail ul {
+  margin: 0.2em 0;
+}
+
+.t-detail ol,
+.t-detail ul {
+  padding-left: 1.4em;
+}
+
+.t-ts {
+  font-variant-numeric: tabular-nums;
+  color: #888;
+}
+
 .t-cat {
   max-width: 16em;
   font-size: 0.78em;
@@ -731,6 +771,12 @@ button:hover {
   .transcript-row:hover,
   .transcript-row:focus {
     background: #2a2f45;
+  }
+  .t-detail {
+    border-left-color: #3a4770;
+  }
+  .t-detail h4 {
+    color: #aaa;
   }
   .transcript-cat {
     background: #2a3350;

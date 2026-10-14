@@ -299,6 +299,25 @@ const selectionAllHidden = () => {
   return rows.length > 0 && rows.every((r) => r.hidden);
 };
 
+// Rows whose AI-summary panel is open; survives list re-renders like the selection does.
+const expandedTranscripts = new Set();
+
+function transcriptDetailHtml(h, owner) {
+  const list = (tag, items) => `<${tag}>${items.map((i) => `<li>${i}</li>`).join("")}</${tag}>`;
+  const mention = (m) => `${m.ts ? `<span class="t-ts">${escapeHtml(m.ts)}</span> ` : ""}${escapeHtml(m.text)}`;
+  return [
+    h.summary ? `<h4>Summary</h4><p>${escapeHtml(h.summary)}</p>` : "",
+    h.actions.length ? `<h4>Key actions</h4>${list("ol", h.actions.map(escapeHtml))}` : "",
+    h.mentions.length ? `<h4>${owner ? `Mentions of ${escapeHtml(owner)}` : "Mentions"}</h4>${list("ul", h.mentions.map(mention))}` : "",
+  ].join("") || "<p>The AI header had no summary, actions or mentions.</p>";
+}
+
+function toggleTranscriptDetail(vtt) {
+  expandedTranscripts.has(vtt) ? expandedTranscripts.delete(vtt) : expandedTranscripts.add(vtt);
+  renderTranscripts();
+  transcriptsList.querySelector(`.transcript-row[data-vtt="${CSS.escape(vtt)}"]`)?.focus();
+}
+
 function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
   const dups = transcriptRows.filter((r) => r.duplicate_of);
@@ -329,6 +348,7 @@ function renderTranscripts() {
     const meta = [r.date, `${r.speakers} speaker${r.speakers === 1 ? "" : "s"}`, `${r.duration_min} min`, `${r.words.toLocaleString()} words`];
     li.innerHTML = `
       <div class="transcript-head">
+        ${r.header ? `<button class="t-expand topbar-btn" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : ""}
         <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
@@ -339,6 +359,7 @@ function renderTranscripts() {
         <button class="t-actions topbar-btn" aria-label="Actions" aria-haspopup="menu" title="Actions">⋯</button>
       </div>
       <span class="skill-plugin">${escapeHtml(meta.filter(Boolean).join(" · "))}${r.duplicate_of ? ` · ${r.near_duplicate ? "nearly identical" : "identical"} to ${escapeHtml(labelOf(r.duplicate_of))}: likely a bad download, real transcript missing` : ""}</span>
+      ${r.header && expandedTranscripts.has(r.vtt) ? `<div class="t-detail">${transcriptDetailHtml(r.header, r.header.owner)}</div>` : ""}
     `;
     transcriptsList.appendChild(li);
   }
@@ -476,6 +497,11 @@ document.querySelector("#transcripts-voc-sel").addEventListener("click", () => v
 document.querySelector("#transcripts-move-sel").addEventListener("click", () => moveTranscripts(selectedList()));
 document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), !selectionAllHidden()));
 document.querySelector("#transcripts-logit-sel").addEventListener("click", () => logitTranscripts(selectedList()));
+
+transcriptsList.addEventListener("click", (e) => {
+  const btn = e.target.closest(".t-expand");
+  if (btn) toggleTranscriptDetail(btn.closest(".transcript-row").dataset.vtt);
+});
 
 // Per-row "⋯" menu: Open, Move…, Run log-it, Hide/Unhide for that one transcript.
 const rowMenu = document.querySelector("#row-menu");
@@ -689,9 +715,15 @@ transcriptsList.addEventListener("dblclick", (e) => {
   if (li) openTranscript(li.dataset.vtt);
 });
 transcriptsList.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
   const li = onTranscriptRow(e);
-  if (li) openTranscript(li.dataset.vtt);
+  if (!li) return;
+  const r = transcriptRows.find((x) => x.vtt === li.dataset.vtt);
+  if (e.key === "Enter") openTranscript(li.dataset.vtt);
+  // → / ← open and close the AI summary on rows that have one.
+  else if (r?.header && e.target === li && ((e.key === "ArrowRight") === !expandedTranscripts.has(li.dataset.vtt)) && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+    e.preventDefault();
+    toggleTranscriptDetail(li.dataset.vtt);
+  }
 });
 transcriptsShowDups.addEventListener("change", renderTranscripts);
 transcriptsShowHidden.addEventListener("change", renderTranscripts);

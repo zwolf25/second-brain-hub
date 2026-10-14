@@ -119,12 +119,132 @@ pub fn merge_cues(cues: Vec<Cue>) -> Vec<Cue> {
     merged
 }
 
-pub fn render(cues: &[Cue], source: &str, title: &str, date: Option<&str>, converted: &str) -> String {
-    let mut out = format!("---\nsource: {source}\ntype: transcript\ntitle: {}\n", serde_json::to_string(title).unwrap());
+/// One "owner mentioned or speaking" line from the AI header.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Mention {
+    pub ts: String,
+    pub text: String,
+}
+
+/// AI header Teams/Felipe's fix prepends to a `.vtt`: summary, action items, owner mentions.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Header {
+    pub summary: Option<String>,
+    pub actions: Vec<String>,
+    pub mentions: Vec<Mention>,
+    pub owner: Option<String>,
+}
+
+fn numbered_item(line: &str) -> Option<&str> {
+    let (n, rest) = line.split_once(". ")?;
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(rest.trim())
+}
+
+/// Owner from the mentions heading: `(Wolf, Zac)` first, else the quoted name; "User name" is a placeholder.
+fn header_owner(heading: &str) -> Option<String> {
+    let inner = |open: char, close: char| {
+        let a = heading.find(open)? + open.len_utf8();
+        let b = a + heading[a..].find(close)?;
+        Some(heading[a..b].trim().to_string())
+    };
+    [inner('(', ')'), inner('"', '"')]
+        .into_iter()
+        .flatten()
+        .find(|n| !n.is_empty() && !n.eq_ignore_ascii_case("user name"))
+}
+
+/// Parses the AI header that precedes the first cue. `None` for old-style files (no
+/// "High-Level Summary:") so they convert exactly as before. Never fails: unknown lines are ignored.
+pub fn parse_header(vtt: &str) -> Option<Header> {
+    let vtt = vtt.strip_prefix('\u{feff}').unwrap_or(vtt).replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<&str> = vtt.lines().collect();
+    let first_cue = lines.iter().position(|l| l.contains("-->")).unwrap_or(lines.len());
+    // Back up over a cue identifier line so it is not read as header text.
+    let end = lines[..first_cue].iter().rposition(|l| l.trim().is_empty()).unwrap_or(0);
+    // The header is written with literal backslash-n sequences as well as real newlines.
+    let region = lines[..end].join("\n").replace("\\n", "\n");
+    if !region.to_lowercase().contains("high-level summary:") {
+        return None;
+    }
+    #[derive(PartialEq)]
+    enum Sec { None, Summary, Actions, Mentions }
+    let (mut sec, mut h, mut summary) = (Sec::None, Header::default(), Vec::<String>::new());
+    for raw in region.lines() {
+        let line = raw.trim();
+        let low = line.to_lowercase();
+        if line.is_empty() || low == "webvtt" || low == "note" {
+            continue;
+        }
+        if low.starts_with("high-level summary") {
+            sec = Sec::Summary;
+            if let Some((_, rest)) = line.split_once(':') {
+                summary.push(rest.trim().to_string());
+            }
+        } else if low.starts_with("key action") {
+            sec = Sec::Actions;
+        } else if low.starts_with("timestamp") && low.contains("mentioned or speaking") {
+            sec = Sec::Mentions;
+            h.owner = header_owner(line);
+        } else if low.starts_with("if you need") || low.starts_with("feel free") {
+            sec = Sec::None;
+        } else {
+            match sec {
+                Sec::Summary => summary.push(line.to_string()),
+                Sec::Actions => match numbered_item(line) {
+                    Some(item) => h.actions.push(item.to_string()),
+                    None => {
+                        if let Some(last) = h.actions.last_mut() {
+                            last.push(' ');
+                            last.push_str(line);
+                        }
+                    }
+                },
+                Sec::Mentions => {
+                    let item = line.trim_start_matches(['-', '*']).trim();
+                    if line.len() == item.len() || low.contains("no direct speech") {
+                        continue;
+                    }
+                    let (range, text) = item.split_once(": ").unwrap_or(("", item));
+                    let ts = range.split_whitespace().next().and_then(parse_time).map(|t| t.0).unwrap_or_default();
+                    h.mentions.push(Mention { ts, text: text.trim().to_string() });
+                }
+                Sec::None => {}
+            }
+        }
+    }
+    let summary = summary.join(" ").trim().to_string();
+    h.summary = (!summary.is_empty()).then_some(summary);
+    Some(h)
+}
+
+pub fn render(cues: &[Cue], source: &str, title: &str, date: Option<&str>, converted: &str, header: Option<&Header>) -> String {
+    let kind = if header.is_some() { "transcript-ai" } else { "transcript" };
+    let mut out = format!("---\nsource: {source}\ntype: {kind}\ntitle: {}\n", serde_json::to_string(title).unwrap());
     if let Some(d) = date {
         out.push_str(&format!("date: {d}\n"));
     }
+    if let Some(o) = header.and_then(|h| h.owner.as_ref()) {
+        out.push_str(&format!("owner: {}\n", serde_json::to_string(o).unwrap()));
+    }
     out.push_str(&format!("converted: {converted}\n---\n\n# {title}\n"));
+    if let Some(h) = header {
+        if let Some(s) = &h.summary {
+            out.push_str(&format!("\n## AI Summary\n\n{s}\n"));
+        }
+        if !h.actions.is_empty() {
+            out.push_str("\n## Key Actions\n\n");
+            for (i, a) in h.actions.iter().enumerate() {
+                out.push_str(&format!("{}. {a}\n", i + 1));
+            }
+        }
+        if !h.mentions.is_empty() {
+            out.push_str("\n## Owner Mentions\n\n");
+            for m in &h.mentions {
+                let ts = if m.ts.is_empty() { String::new() } else { format!("[{}] ", m.ts) };
+                out.push_str(&format!("- {ts}{}\n", m.text));
+            }
+        }
+    }
     for c in cues {
         out.push_str(&format!("\n## [{}]\n\n", c.ts));
         if let Some(s) = &c.speaker {
@@ -215,6 +335,12 @@ pub struct Entry {
     /// "Don't process as VoC": excluded from any automatic VoC run.
     #[serde(default)]
     pub voc_skip: bool,
+    /// AI header (summary / actions / owner mentions); `None` for files without one.
+    #[serde(default)]
+    pub header: Option<Header>,
+    /// Source was checked for an AI header; entries from before the header existed re-scan once.
+    #[serde(default)]
+    pub header_checked: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -363,6 +489,8 @@ fn process_one(path: &Path, name: &str, mtime: u64, rules: &Rules, state: &State
         speakers,
         duration_min: cues.iter().map(|c| c.end_secs).max().unwrap_or(0).div_ceil(60),
         words,
+        header: parse_header(&text),
+        header_checked: true,
         ..Default::default()
     })
 }
@@ -484,7 +612,8 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
     for path in vtt_files(src) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let mtime = mtime_secs(&path);
-        if state.entries.get(&name).is_some_and(|e| e.vtt_mtime >= mtime) {
+        let migrating = state.entries.get(&name).is_some_and(|e| e.vtt_mtime >= mtime && !e.header_checked);
+        if !migrating && state.entries.get(&name).is_some_and(|e| e.vtt_mtime >= mtime) {
             continue;
         }
         // OneDrive cloud-only placeholders can fail to read; skip and retry next scan.
@@ -495,7 +624,9 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                     entry.md_path = old.md_path.clone();
                     (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone());
                     (entry.voc_ingested, entry.voc_skip) = (old.voc_ingested, old.voc_skip);
-                    reconvert.insert(name.clone());
+                    if !migrating || entry.header.is_some() {
+                        reconvert.insert(name.clone());
+                    }
                 }
                 if entry.category == "Other" && entry.category_source == "fallback" {
                     report.auto_other.push(entry.clone());
@@ -522,7 +653,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
         let Ok(text) = std::fs::read_to_string(src.join(&name)) else { continue };
         let cues = merge_cues(parse_cues(&text));
         let md = e.md_path.as_ref().map(PathBuf::from).unwrap_or_else(|| out.join(format!("{}.md", name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s))));
-        std::fs::write(&md, render(&cues, &name, &e.title, e.date.as_deref(), &converted))?;
+        std::fs::write(&md, render(&cues, &name, &e.title, e.date.as_deref(), &converted, e.header.as_ref()))?;
         let e = state.entries.get_mut(&name).unwrap();
         e.md_path = Some(md.to_string_lossy().to_string());
         e.converted_at = Some(converted.clone());
@@ -818,6 +949,7 @@ pub struct Row {
     pub hidden_reason: Option<String>,
     pub voc_ingested: bool,
     pub voc_skip: bool,
+    pub header: Option<Header>,
 }
 
 pub fn rows(out: &Path) -> Vec<Row> {
@@ -848,6 +980,7 @@ pub fn rows(out: &Path) -> Vec<Row> {
                 hidden_reason: e.hidden_reason.clone(),
                 voc_ingested: e.voc_ingested,
                 voc_skip: e.voc_skip,
+                header: e.header.clone(),
             }
         })
         .collect();
@@ -926,6 +1059,78 @@ mod tests {
         // Prose that merely contains a colon is not split when it isn't the dominant shape.
         let prose = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nnote: this is fine\n\n00:00:03.000 --> 00:00:04.000\nno speaker here\n\n00:00:05.000 --> 00:00:06.000\nor here\n";
         assert!(parse_cues(prose).iter().all(|c| c.speaker.is_none()));
+    }
+
+    #[test]
+    fn ai_header_parses_literal_newlines_and_crlf() {
+        let v = fixture("ai-header.vtt");
+        let h = parse_header(&v).unwrap();
+        assert_eq!(h.summary.as_deref(), Some("The team reviewed subscriber usage and agreed on a dashboard approach. A follow-up is planned."));
+        assert_eq!(h.actions, ["Zac Wolf to share the usage export by Friday.", "Lisa Pei to draft the rollout note and send it to the team."]);
+        assert_eq!(h.owner.as_deref(), Some("Wolf, Zac"));
+        assert_eq!(h.mentions.len(), 2);
+        assert_eq!((h.mentions[0].ts.as_str(), h.mentions[0].text.as_str()), ("00:00:04", "Wolf, Zac opens the meeting."));
+        let cues = parse_cues(&v);
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].speaker.as_deref(), Some("Wolf, Zac"));
+    }
+
+    #[test]
+    fn ai_header_placeholder_owner_no_mentions_and_cue_id() {
+        let v = fixture("ai-header-no-mentions.vtt");
+        let h = parse_header(&v).unwrap();
+        assert_eq!(h.owner.as_deref(), Some("Erik Eastham"));
+        assert!(h.mentions.is_empty());
+        assert_eq!(h.actions, ["Erik to update the plan."]);
+        assert_eq!(parse_cues(&v).len(), 1);
+    }
+
+    #[test]
+    fn no_header_means_none_and_unchanged_render() {
+        let v = fixture("simple.vtt");
+        assert!(parse_header(&v).is_none());
+        let md = render(&merge_cues(parse_cues(&v)), "s.vtt", "T", None, "2026-01-01", None);
+        assert!(md.contains("type: transcript\n") && !md.contains("AI Summary"));
+    }
+
+    #[test]
+    fn header_renders_sections_and_never_changes_hash() {
+        let v = fixture("ai-header.vtt");
+        let cues = merge_cues(parse_cues(&v));
+        let h = parse_header(&v);
+        let md = render(&cues, "s.vtt", "T", None, "2026-01-01", h.as_ref());
+        assert!(md.contains("type: transcript-ai\n") && md.contains("owner: \"Wolf, Zac\"\n"));
+        let at = |s: &str| md.find(s).unwrap();
+        assert!(at("## AI Summary") < at("## Key Actions") && at("## Owner Mentions") < at("## [00:00:04]"));
+        assert!(md.contains("1. Zac Wolf to share") && md.contains("- [00:00:04] Wolf, Zac opens"));
+        let bare = "WEBVTT\n\n00:00:04.182 --> 00:00:23.142\n<v Wolf, Zac>Welcome everyone to the usage review.</v>\n\n00:00:30.000 --> 00:00:40.000\n<v Pei, Lisa>Zac, can you share the export?</v>\n";
+        assert_eq!(content_hash(&cues), content_hash(&merge_cues(parse_cues(bare))));
+    }
+
+    #[test]
+    fn header_scan_picks_up_header_and_migrates_old_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, out) = (tmp.path().join("src"), tmp.path().join("out"));
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("Sync_2026-10-13_16-39_Transcript.vtt"), fixture("ai-header.vtt")).unwrap();
+        std::fs::write(src.join("Old_2026-10-01_10-00_Transcript.vtt"), fixture("simple.vtt")).unwrap();
+        let rules = Rules::embedded();
+        scan(&src, &out, &rules).unwrap();
+        let mut st = load_state(&out);
+        let e = &st.entries["Sync_2026-10-13_16-39_Transcript.vtt"];
+        assert!(e.header_checked && e.header.as_ref().unwrap().actions.len() == 2);
+        assert!(st.entries["Old_2026-10-01_10-00_Transcript.vtt"].header.is_none());
+        // Pre-header state: same mtime, no header recorded -> one re-scan fills it in.
+        for e in st.entries.values_mut() {
+            e.header = None;
+            e.header_checked = false;
+        }
+        save_state(&out, &st).unwrap();
+        let r = scan(&src, &out, &rules).unwrap();
+        let st = load_state(&out);
+        assert!(st.entries["Sync_2026-10-13_16-39_Transcript.vtt"].header.is_some());
+        assert_eq!(r.converted, 1, "only the headered file is rewritten");
+        assert_eq!(scan(&src, &out, &rules).unwrap().processed, 0);
     }
 
     #[test]
