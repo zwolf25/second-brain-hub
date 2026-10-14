@@ -677,8 +677,8 @@ button:hover {
   border: 0;
   background: none;
   color: #777;
-  font-size: 0.95em;
-  line-height: 1;
+  font-size: inherit;
+  line-height: inherit;
   cursor: pointer;
 }
 
