@@ -655,10 +655,22 @@ button:hover {
   text-decoration: underline;
 }
 
+/* Checkbox + chevron slots are fixed px so the meta line can indent to the title (16 + 18 + 2 * 8). */
 .transcript-head {
   display: flex;
   align-items: center;
-  gap: 0.6em;
+  gap: 8px;
+}
+
+.transcript-head .t-sel {
+  flex: none;
+  width: 16px;
+  margin: 0;
+}
+
+.transcript-row > .skill-plugin {
+  display: block;
+  padding-left: 50px;
 }
 
 .transcript-head .skill-name {
@@ -669,7 +681,7 @@ button:hover {
 .t-expand,
 .t-expand-gap {
   flex: none;
-  width: 1em;
+  width: 18px;
 }
 
 .t-expand {
@@ -677,8 +689,8 @@ button:hover {
   border: 0;
   background: none;
   color: #777;
-  font-size: 0.95em;
-  line-height: inherit;
+  font-size: 1.6em;
+  line-height: 1;
   cursor: pointer;
 }
 
