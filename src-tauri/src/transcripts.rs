@@ -325,7 +325,7 @@ pub struct Entry {
     pub duration_min: u32,
     #[serde(default)]
     pub words: u32,
-    /// Off the default list (files untouched, still indexed). `hidden_reason` is "manual" or "logged".
+    /// Off the default list (files untouched, still indexed). `hidden_reason` is "manual", "logged" or "auto".
     #[serde(default)]
     pub hidden: bool,
     #[serde(default)]
@@ -333,6 +333,9 @@ pub struct Entry {
     /// Sent to log-it. Set optimistically at launch (a deep link can't confirm completion).
     #[serde(default)]
     pub logged: bool,
+    /// An auto "hide" rule already hid this row once; unhiding it sticks.
+    #[serde(default)]
+    pub auto_hid: bool,
     /// "manual" or "auto"; a moved file is never auto-moved again.
     #[serde(default)]
     pub moved_by: Option<String>,
@@ -638,7 +641,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                 // Changed source: keep md_path so the same file is rewritten, but force reconversion below.
                 if let Some(old) = state.entries.get(&name) {
                     entry.md_path = old.md_path.clone();
-                    (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone());
+                    (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by, entry.auto_hid) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone(), old.auto_hid);
                     (entry.voc_ingested, entry.voc_skip) = (old.voc_ingested, old.voc_skip);
                     if !migrating || entry.header.is_some() || old.title != entry.title {
                         reconvert.insert(name.clone());
@@ -839,6 +842,7 @@ pub fn auto_move_preview(out: &Path, rules: &[crate::config::AutoRule], idx: usi
         .filter(|e| match action {
             "log-it" => !e.logged && !e.hidden && in_scope(&rules[idx], e, today),
             "voc" => voc_eligible(&rules[idx], e, today),
+            "hide" => !e.hidden && !e.auto_hid && in_scope(&rules[idx], e, today),
             _ => claiming_rule(rules, e, today, Some(idx)) == Some(idx),
         })
         .count()
@@ -970,6 +974,27 @@ pub fn auto_add_to_raw(out: &Path, raw: &Path, rules: &[crate::config::AutoRule]
         return Ok(0);
     }
     stub_entries(out, raw, |_, e| !e.logged && !e.hidden && e.raw_note.is_none() && stub_rules.iter().any(|r| in_scope(r, e, today))).map(|(w, _)| w)
+}
+
+/// Auto rules: hides visible transcripts an enabled "hide" rule covers (converted `after_days` ago or more). Each row is
+/// auto-hidden once (`auto_hid`), so a later Unhide sticks. Runs last in a scan, after stubs, so nothing is hidden before
+/// an "Add to Second Brain" rule has seen it. Returns the number hidden.
+pub fn auto_hide(out: &Path, rules: &[crate::config::AutoRule]) -> Result<usize> {
+    let today = crate::audit::days_since_epoch(&today_utc());
+    let hide_rules: Vec<_> = rules.iter().filter(|r| r.action == "hide" && r.enabled).collect();
+    if hide_rules.is_empty() {
+        return Ok(0);
+    }
+    let mut state = load_state(out);
+    let mut n = 0;
+    for e in state.entries.values_mut().filter(|e| !e.hidden && !e.auto_hid && hide_rules.iter().any(|r| in_scope(r, e, today))) {
+        (e.hidden, e.hidden_reason, e.auto_hid) = (true, Some("auto".into()), true);
+        n += 1;
+    }
+    if n > 0 {
+        save_state(out, &state)?;
+    }
+    Ok(n)
 }
 
 /// VoC runs only on rows the categorizer filed under a rule's categories, never `Other`, and never ones the user
@@ -1406,6 +1431,26 @@ mod tests {
         assert_eq!(move_selected(&out, &[a.to_string()], &dest).unwrap().moved, 1);
         let moved = load_state(&out).entries[a].md_path.clone().unwrap();
         assert!(std::fs::read_to_string(&stub).unwrap().contains(&serde_json::to_string(&moved).unwrap()));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn auto_hide_respects_age_and_unhide_sticks() {
+        let d = std::env::temp_dir().join(format!("tr-autohide-{}", std::process::id()));
+        let (src, out) = (d.join("src"), d.join("out"));
+        std::fs::create_dir_all(&src).unwrap();
+        let n = "Weekly Release Management-20260101_100000-Meeting Recording.vtt";
+        std::fs::write(src.join(n), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>hide me body words</v>\n").unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap_or_else(|e| panic!("{e:#}"));
+        let rule = |days| crate::config::AutoRule { id: "h".into(), action: "hide".into(), enabled: true, dest: None, mode: "exclude".into(), categories: vec![], after_days: days, since: None };
+        assert_eq!(auto_hide(&out, &[rule(30)]).unwrap(), 0, "converted today is not older than 30 days");
+        assert_eq!(auto_hide(&out, &[rule(0)]).unwrap(), 1);
+        let e = load_state(&out).entries[n].clone();
+        assert!(e.hidden && e.auto_hid && e.hidden_reason.as_deref() == Some("auto"));
+        set_hidden(&out, &[n.to_string()], false).unwrap();
+        assert_eq!(auto_hide(&out, &[rule(0)]).unwrap(), 0, "unhide sticks");
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        assert!(load_state(&out).entries[n].auto_hid, "auto_hid survives a rescan");
         std::fs::remove_dir_all(&d).ok();
     }
 

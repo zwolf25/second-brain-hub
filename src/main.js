@@ -351,7 +351,7 @@ function renderTranscripts() {
         <input type="checkbox" class="t-sel" aria-label="Select"${selectedTranscripts.has(r.vtt) ? " checked" : ""}${r.duplicate_of ? " disabled" : ""} />
         ${r.header ? `<button class="t-expand" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : '<span class="t-expand-gap"></span>'}
         <span class="skill-name">${escapeHtml(r.title)}</span>
-        ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : "Hidden"}</span>` : ""}
+        ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : r.hidden_reason === "auto" ? "Auto-hidden" : "Hidden"}</span>` : ""}
         ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
         ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">Skip Auto VoC</span>' : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
@@ -607,7 +607,7 @@ async function refreshRulePreview() {
   const list = rf.editing >= 0 ? autoRules.map((r, i) => (i === idx ? rule : r)) : [...autoRules, rule];
   const n = rule.action === "move" && !rule.dest ? null : await invoke("preview_auto_rule", { rules: list, idx });
   rf.preview.textContent =
-    n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be flagged for VoC" }[rule.action] ?? "be added to your raw notes"} when this rule is on.`;
+    n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be flagged for VoC", hide: "be hidden" }[rule.action] ?? "be added to your raw notes"} when this rule is on.`;
 }
 async function openRuleModal(index, presetAction) {
   const cats = await invoke("get_transcript_categories");
@@ -652,6 +652,7 @@ rf.action.addEventListener("change", () => {
   renderRuleCats([...rf.cats.querySelectorAll("input:checked")].map((i) => i.value));
   rf.destField.classList.toggle("hidden", rf.action.value !== "move");
   rf.existingField.classList.toggle("hidden", rf.action.value !== "log-it");
+  if (rf.action.value === "hide" && !parseInt(rf.days.value, 10)) rf.days.value = 30;
   refreshRulePreview();
 });
 [rf.mode, rf.days, rf.cats, rf.existing].forEach((el) => el.addEventListener("change", refreshRulePreview));
@@ -681,7 +682,7 @@ function renderAutoRules() {
     row.className = "auto-rule-row";
     row.innerHTML = `
       <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
-      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Flag for VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Add to Second Brain</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Flag for VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Add to Second Brain</strong> ${escapeHtml(what)}` : r.action === "hide" ? `<strong>Hide</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
       <button class="topbar-btn rule-edit">Edit</button>
       <button class="topbar-btn rule-del">Delete</button>`;
     row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));

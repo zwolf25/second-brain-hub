@@ -300,7 +300,7 @@ fn run_auto_move(state: &AppState) {
     };
 }
 
-/// Writes raw-note stubs for the auto "Add to Second Brain" rules, then refreshes the VoC hand-off file.
+/// Writes raw-note stubs for the auto "Add to Second Brain" rules, applies the auto-hide rules, then refreshes the VoC hand-off file.
 /// Caller holds `transcripts_scan`. Failures only log; the next scan retries. No Claude task is involved.
 fn sync_raw_stubs(state: &AppState) {
     let (rules, raw) = {
@@ -311,6 +311,9 @@ fn sync_raw_stubs(state: &AppState) {
         if let Err(e) = transcripts::auto_add_to_raw(&state.transcripts_dir, &raw, &rules) {
             tracing::warn!("auto raw notes: {e:#}");
         }
+    }
+    if let Err(e) = transcripts::auto_hide(&state.transcripts_dir, &rules) {
+        tracing::warn!("auto hide: {e:#}");
     }
     let Some(bridge) = transcripts::bridge_dir() else { return };
     let _ = std::fs::remove_file(bridge.join("log-queue.json")); // left by 0.7.x; nothing reads it any more
@@ -634,7 +637,7 @@ fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String
 fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
     let no_raw = state.config.lock().unwrap().raw_path.is_none();
     if let Some(bad) = rules.iter().find(|r| {
-        !["move", "log-it", "voc"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none()) || (r.action == "log-it" && r.enabled && no_raw)
+        !["move", "log-it", "voc", "hide"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none()) || (r.action == "log-it" && r.enabled && no_raw)
     }) {
         return Err(format!("Rule {} is incomplete (a move rule needs a folder; \"Add to Second Brain\" needs your raw folder set in Settings).", bad.id));
     }
