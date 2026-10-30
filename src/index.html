@@ -89,7 +89,7 @@
           <li class="setting-row" id="auto-rules-anchor">
             <div class="setting-row-main">
               <span class="setting-label">Auto rules</span>
-              <span class="setting-value">A rule either moves converted transcripts of chosen categories to a folder after every scan (first matching move rule wins), or queues them for log-it, which the transcript-log skill runs on a schedule. Auto VoC rules are not available yet.</span>
+              <span class="setting-value">Rules run inside the Hub after every scan, with no scheduled Claude task. A move rule relocates converted transcripts of chosen categories to a folder (first matching move rule wins). An Add to Second Brain rule writes a short note in your raw folder that points at the transcript; /wiki-builder reads it when you run it. A Flag for VoC rule marks matching transcripts as ready, and nothing is processed until you click Process.</span>
             </div>
             <div class="setting-row-actions"><button id="add-rule-btn" class="topbar-btn">Add rule</button></div>
           </li>
@@ -230,12 +230,16 @@
           <button id="transcripts-move-sel" class="topbar-btn" title="Move the converted markdown files to a folder you choose">Move…</button>
           <button id="transcripts-hide-sel" class="topbar-btn">Hide</button>
           <button id="transcripts-voc-sel" class="topbar-btn" title="Opens Claude Desktop and runs /voc-library-ingest on the selected transcripts. Copies the transcript, including attendee names, into the shared vault (asks you to approve first; uses tokens)">Process VoC</button>
-          <button id="transcripts-logit-sel" class="topbar-btn" title="Opens Claude Desktop and runs /log-it on each selected transcript (uses tokens)">Run log-it</button>
+          <button id="transcripts-logit-sel" class="topbar-btn" title="Writes a note in your raw folder that points at each selected transcript. /wiki-builder reads it later; nothing runs now and no tokens are used">Add to Second Brain</button>
           <button id="transcripts-clear-sel" class="topbar-btn">Clear</button>
         </div>
         <p id="transcripts-privacy" class="hint muted transcripts-privacy hidden">
           Fixing a category shares only the meeting title, day, old and new category, and size buckets with the team owner to improve the rules — never transcript text or names.
           <button id="transcripts-view-shared" class="linklike">View what's shared</button>
+        </p>
+        <p id="transcripts-voc-ready" class="hint transcripts-privacy hidden">
+          <span id="transcripts-voc-ready-text"></span>
+          <button id="transcripts-voc-ready-btn" class="topbar-btn">Process VoC</button>
         </p>
         <ul id="transcripts-list" class="skills-list"></ul>
       </section>
@@ -246,8 +250,8 @@
           <label class="modal-field">Action
             <select id="rule-action">
               <option value="move">Move to a folder</option>
-              <option value="log-it">Log-it (queued for the transcript-log skill)</option>
-              <option value="voc">Process VoC (queued for the VoC skill)</option>
+              <option value="log-it">Add to Second Brain (raw note for /wiki-builder)</option>
+              <option value="voc">Flag for VoC (you click Process)</option>
             </select>
           </label>
           <div id="rule-dest-field" class="modal-field">Destination folder
@@ -257,6 +261,7 @@
             <select id="rule-mode"><option value="include">Only these categories</option><option value="exclude">Everything except these categories</option></select>
           </label>
           <div id="rule-cats" class="rule-cats"></div>
+          <label id="rule-existing-field" class="modal-field hidden"><span><input id="rule-existing" type="checkbox" /> Also include transcripts already converted (otherwise only new ones from today)</span></label>
           <label class="modal-field">Wait <input id="rule-days" type="number" min="0" value="0" style="width:4em" /> days after conversion (0 = right away)</label>
           <p id="rule-preview" class="hint muted"></p>
           <div class="modal-actions">

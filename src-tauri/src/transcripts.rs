@@ -351,6 +351,9 @@ pub struct Entry {
     /// Source was checked for an AI header; entries from before the header existed re-scan once.
     #[serde(default)]
     pub header_checked: bool,
+    /// Raw-note stub in the personal `raw/` that points at this transcript for `/wiki-builder`.
+    #[serde(default)]
+    pub raw_note: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -716,15 +719,6 @@ pub fn set_hidden(out: &Path, vtts: &[String], hidden: bool) -> Result<()> {
     save_state(out, &state)
 }
 
-/// Marks transcripts as sent to log-it and auto-hides them ("Logged" under Show hidden).
-pub fn mark_logged(out: &Path, vtts: &[String]) -> Result<()> {
-    let mut state = load_state(out);
-    for e in state.entries.iter_mut().filter(|(k, _)| vtts.contains(k)).map(|(_, e)| e) {
-        (e.logged, e.hidden, e.hidden_reason) = (true, true, Some("logged".into()));
-    }
-    save_state(out, &state)
-}
-
 /// Marks transcripts as sent to VoC (badge only; they stay visible and eligible for log-it).
 pub fn mark_voc(out: &Path, vtts: &[String]) -> Result<()> {
     let mut state = load_state(out);
@@ -794,6 +788,9 @@ fn move_entries(out: &Path, by: &str, plan: impl Fn(&str, &Entry) -> Option<Path
             Ok(to) => {
                 e.md_path = Some(to.to_string_lossy().to_string());
                 e.moved_by = Some(by.into());
+                if let Some(stub) = &e.raw_note {
+                    patch_stub_path(stub, &to);
+                }
                 report.moved += 1;
             }
             Err(err) => {
@@ -817,7 +814,8 @@ fn in_scope(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
     let listed = rule.categories.contains(&e.category);
     let in_scope = if rule.mode == "exclude" { !listed } else { listed };
     let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + rule.after_days);
-    in_scope && old_enough
+    let since = rule.since.as_deref().is_none_or(|s| e.converted_at.as_deref().is_some_and(|d| d >= s));
+    in_scope && old_enough && since
 }
 
 /// Index of the rule that claims `e`: the first enabled move rule that matches.
@@ -853,7 +851,7 @@ pub fn auto_move(out: &Path, rules: &[crate::config::AutoRule]) -> Result<MoveRe
     move_entries(out, "auto", |_, e| claiming_rule(rules, e, today, None).and_then(|i| rules[i].dest.clone()))
 }
 
-/// Where the Hub and the `transcript-log` skill hand work to each other (same relative path on macOS and Windows).
+/// Where the Hub leaves `voc-queue.json` for an ad hoc `/voc-library-ingest` (same relative path on macOS and Windows).
 pub fn bridge_dir() -> Option<PathBuf> {
     crate::config::dirs_home().map(|h| h.join(".claude/second-brain-hub/transcripts"))
 }
@@ -867,12 +865,111 @@ struct QueueItem<'a> {
     category: &'a str,
 }
 
-/// Writes `log-queue.json`: converted, visible, not-yet-logged transcripts that an enabled log-it rule covers.
-/// The skill only reads it; all category/age filtering stays here. Returns the queue length.
-pub fn write_log_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &Path) -> Result<usize> {
+/// Characters Windows or OneDrive reject in a file name.
+fn safe_name(s: &str) -> String {
+    s.chars().take(80).map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '-' } else { c }).collect::<String>().trim().to_string()
+}
+
+/// Reference note for `/wiki-builder`: frontmatter pointing at the converted transcript, plus the AI header's summary and actions.
+fn stub_text(vtt: &str, e: &Entry, md: &str, date: &str) -> String {
+    let q = |s: &str| serde_json::to_string(s).unwrap_or_default(); // JSON strings are valid YAML
+    let mut t = format!(
+        "---\ndate: {date}\ntype: transcript-ref\ntags: [transcript-ref]\nsource-transcript: {}\nsource-vtt: {}\ncategory: {}\n---\n\n# {} (meeting transcript)\n\n> Reference note. The full text is at `source-transcript`; /wiki-builder reads it.\n",
+        q(md),
+        q(vtt),
+        q(&e.category),
+        e.title
+    );
+    if let Some(h) = &e.header {
+        if let Some(s) = h.summary.as_deref().filter(|s| !s.trim().is_empty()) {
+            t += &format!("\n## Summary\n{}\n", s.trim());
+        }
+        if !h.actions.is_empty() {
+            t += "\n## Action items\n";
+            h.actions.iter().for_each(|a| t += &format!("- {a}\n"));
+        }
+    }
+    t
+}
+
+/// Writes the stub into `raw`, never overwriting: a taken name gets the content-hash suffix, then a counter.
+fn write_stub(raw: &Path, vtt: &str, e: &Entry, md: &str) -> Result<PathBuf> {
+    use std::io::Write;
+    let date = e.date.clone().or_else(|| e.converted_at.clone()).unwrap_or_else(today_utc);
+    let base = format!("{date} - {} (transcript)", safe_name(&e.title));
+    let text = stub_text(vtt, e, md, &date);
+    let hash: String = e.content_hash.chars().take(6).collect();
+    let mut n = 0u32;
+    loop {
+        let file = match n {
+            0 => format!("{base}.md"),
+            1 => format!("{base} {hash}.md"),
+            _ => format!("{base} {hash}-{n}.md"),
+        };
+        let to = raw.join(file);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&to) {
+            Ok(mut f) => {
+                f.write_all(text.as_bytes()).context("writing raw note")?;
+                return Ok(to);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(err) => return Err(err).context("creating raw note"),
+        }
+    }
+}
+
+/// Keeps a stub's `source-transcript:` line in step with a moved transcript.
+fn patch_stub_path(stub: &str, md: &Path) {
+    let Ok(text) = std::fs::read_to_string(stub) else { return };
+    let line = format!("source-transcript: {}", serde_json::to_string(&md.to_string_lossy()).unwrap_or_default());
+    let lines: Vec<&str> = text.lines().map(|l| if l.starts_with("source-transcript:") { line.as_str() } else { l }).collect();
+    let _ = std::fs::write(stub, lines.join("\n") + "\n");
+}
+
+/// Writes a raw-note stub for every entry `wanted` accepts and marks it logged (which hides the row).
+/// Returns (written, skipped). Duplicates, unconverted rows and entries whose stub still exists are skipped.
+fn stub_entries(out: &Path, raw: &Path, wanted: impl Fn(&str, &Entry) -> bool) -> Result<(usize, usize)> {
+    anyhow::ensure!(raw.is_dir(), "Raw folder is missing: {}", raw.display());
+    let mut state = load_state(out);
+    let (mut written, mut skipped) = (0, 0);
+    for (name, e) in state.entries.iter_mut().filter(|(n, e)| wanted(n, e)) {
+        let md = e.md_path.clone().filter(|p| Path::new(p).is_file());
+        if e.duplicate_of.is_some() || md.is_none() || e.raw_note.as_deref().is_some_and(|p| Path::new(p).is_file()) {
+            skipped += 1;
+            continue;
+        }
+        match write_stub(raw, name, e, &md.unwrap_or_default()) {
+            Ok(to) => {
+                e.raw_note = Some(to.to_string_lossy().to_string());
+                (e.logged, e.hidden, e.hidden_reason) = (true, true, Some("logged".into()));
+                written += 1;
+            }
+            Err(err) => {
+                tracing::warn!("raw note for {name}: {err:#}");
+                skipped += 1;
+            }
+        }
+    }
+    if written > 0 {
+        save_state(out, &state)?;
+    }
+    Ok((written, skipped))
+}
+
+/// Manual "Add to Second Brain" for the chosen transcripts.
+pub fn add_to_raw(out: &Path, raw: &Path, vtts: &[String]) -> Result<(usize, usize)> {
+    stub_entries(out, raw, |n, _| vtts.iter().any(|v| v == n))
+}
+
+/// Auto rules: visible, not-yet-added transcripts that an enabled "log-it" rule covers. Runs after auto-move so the stub
+/// records the final path; a later move patches it. Returns the number written.
+pub fn auto_add_to_raw(out: &Path, raw: &Path, rules: &[crate::config::AutoRule]) -> Result<usize> {
     let today = crate::audit::days_since_epoch(&today_utc());
-    let log_rules: Vec<_> = rules.iter().filter(|r| r.action == "log-it" && r.enabled).collect();
-    write_queue(out, bridge, "log-queue.json", |e| !e.logged && !e.hidden && log_rules.iter().any(|r| in_scope(r, e, today)), None)
+    let stub_rules: Vec<_> = rules.iter().filter(|r| r.action == "log-it" && r.enabled).collect();
+    if stub_rules.is_empty() {
+        return Ok(0);
+    }
+    stub_entries(out, raw, |_, e| !e.logged && !e.hidden && e.raw_note.is_none() && stub_rules.iter().any(|r| in_scope(r, e, today))).map(|(w, _)| w)
 }
 
 /// VoC runs only on rows the categorizer filed under a rule's categories, never `Other`, and never ones the user
@@ -889,6 +986,19 @@ pub fn write_voc_queue(out: &Path, rules: &[crate::config::AutoRule], bridge: &P
 }
 
 pub const VOC_MAX_PER_RUN: usize = 5;
+
+/// Rows an enabled VoC rule has flagged (first `VOC_MAX_PER_RUN`); the Transcripts page offers them in one click.
+pub fn voc_ready(out: &Path, rules: &[crate::config::AutoRule]) -> Vec<String> {
+    let today = crate::audit::days_since_epoch(&today_utc());
+    let voc_rules: Vec<_> = rules.iter().filter(|r| r.action == "voc" && r.enabled).collect();
+    load_state(out)
+        .entries
+        .iter()
+        .filter(|(_, e)| e.duplicate_of.is_none() && e.md_path.as_deref().is_some_and(|p| Path::new(p).is_file()) && voc_rules.iter().any(|r| voc_eligible(r, e, today)))
+        .map(|(n, _)| n.clone())
+        .take(VOC_MAX_PER_RUN)
+        .collect()
+}
 
 fn write_queue(out: &Path, bridge: &Path, file: &str, wanted: impl Fn(&Entry) -> bool, max_per_run: Option<usize>) -> Result<usize> {
     let state = load_state(out);
@@ -907,37 +1017,6 @@ fn write_queue(out: &Path, bridge: &Path, file: &str, wanted: impl Fn(&Entry) ->
     std::fs::write(&tmp, serde_json::to_string_pretty(&doc)?)?;
     std::fs::rename(&tmp, bridge.join(file)).with_context(|| format!("writing {file}"))?;
     Ok(items.len())
-}
-
-/// Reads receipts the skill left in `logged/*.json` (`{"vtt": ...}` each), marks those transcripts logged
-/// (which hides them), then deletes the receipts. One file per receipt, so the skill never has to edit a shared file.
-pub fn ingest_logged(out: &Path, bridge: &Path) -> Result<usize> {
-    let dir = bridge.join("logged");
-    let Ok(read) = std::fs::read_dir(&dir) else { return Ok(0) };
-    let (mut logged, mut voc) = (Vec::new(), Vec::new());
-    let mut done = Vec::new();
-    for f in read.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|x| x == "json")) {
-        let Some(j) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else {
-            continue; // unreadable or half-synced: leave it for the next scan
-        };
-        let Some(v) = j["vtt"].as_str().map(String::from) else { continue };
-        // `kind` is "log-it" (default) or "voc": a VoC receipt only sets the VoC badge, it never hides.
-        if j["kind"].as_str() == Some("voc") { voc.push(v) } else { logged.push(v) }
-        done.push(f);
-    }
-    if done.is_empty() {
-        return Ok(0);
-    }
-    if !logged.is_empty() {
-        mark_logged(out, &logged)?;
-    }
-    if !voc.is_empty() {
-        mark_voc(out, &voc)?;
-    }
-    done.iter().for_each(|f| {
-        let _ = std::fs::remove_file(f);
-    });
-    Ok(done.len())
 }
 
 /// What the Transcripts page shows per row.
@@ -1190,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn hide_and_logged_survive_rescan_and_unhide_requeues() {
+    fn hide_and_logged_survive_rescan_and_unhide_clears_logged() {
         let d = std::env::temp_dir().join(format!("tr-hide-{}", std::process::id()));
         let (src, out) = (d.join("src"), d.join("out"));
         std::fs::create_dir_all(&src).unwrap();
@@ -1198,7 +1277,9 @@ mod tests {
         let rules = Rules::embedded();
         scan(&src, &out, &rules).unwrap();
         let v = vec![load_state(&out).entries.keys().next().unwrap().clone()];
-        mark_logged(&out, &v).unwrap();
+        let raw = d.join("raw");
+        std::fs::create_dir_all(&raw).unwrap();
+        assert_eq!(add_to_raw(&out, &raw, &v).unwrap(), (1, 0));
         let e = &load_state(&out).entries[&v[0]];
         assert!(e.logged && e.hidden && e.hidden_reason.as_deref() == Some("logged"));
         // source changes: flags must survive reprocessing
@@ -1233,6 +1314,7 @@ mod tests {
             mode: mode.into(),
             categories: cats.iter().map(|c| c.to_string()).collect(),
             after_days: 0,
+            since: None,
         };
         let cfg = vec![rule("r", &dest, "include", &["Release Meetings"])];
         let r = auto_move(&out, &cfg).unwrap();
@@ -1278,40 +1360,52 @@ mod tests {
     }
 
     #[test]
-    fn log_queue_and_receipts() {
-        let d = std::env::temp_dir().join(format!("tr-logq-{}", std::process::id()));
-        let (src, out, bridge) = (d.join("src"), d.join("out"), d.join("bridge"));
-        std::fs::create_dir_all(&src).unwrap();
+    fn raw_stubs_for_manual_auto_and_moved_transcripts() {
+        let d = std::env::temp_dir().join(format!("tr-stub-{}", std::process::id()));
+        let (src, out, raw, dest) = (d.join("src"), d.join("out"), d.join("raw"), d.join("dest"));
+        for dir in [&src, &raw, &dest] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
         let vtt = |b: &str| format!("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>{b}</v>\n");
         let (a, b) = ("Weekly Release Management-20260101_100000-Meeting Recording.vtt", "Kaizen Review-20260102_100000-Meeting Recording.vtt");
         std::fs::write(src.join(a), vtt("release")).unwrap();
         std::fs::write(src.join(b), vtt("kaizen")).unwrap();
         scan(&src, &out, &Rules::embedded()).unwrap();
-        let rule = |action: &str, cats: &[&str], enabled| crate::config::AutoRule {
+        let rule = |cats: &[&str], enabled, since: Option<&str>| crate::config::AutoRule {
             id: "r".into(),
-            action: action.into(),
+            action: "log-it".into(),
             enabled,
             dest: None,
             mode: "include".into(),
             categories: cats.iter().map(|c| c.to_string()).collect(),
             after_days: 0,
+            since: since.map(Into::into),
         };
-        assert_eq!(write_log_queue(&out, &[rule("log-it", &["Release Meetings"], false)], &bridge).unwrap(), 0, "disabled rule queues nothing");
-        let rules = [rule("log-it", &["Release Meetings", "Kaizen Meetings"], true)];
-        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 2);
+        let both = ["Release Meetings", "Kaizen Meetings"];
+        assert_eq!(auto_add_to_raw(&out, &raw, &[rule(&both, false, None)]).unwrap(), 0, "disabled rule writes nothing");
+        assert_eq!(auto_add_to_raw(&out, &raw, &[rule(&both, true, Some("2999-01-01"))]).unwrap(), 0, "`since` in the future excludes existing files");
+        // a taken file name is never overwritten
+        let ea = load_state(&out).entries[a].clone();
+        let taken = raw.join(format!("{} - {} (transcript).md", ea.date.clone().or(ea.converted_at.clone()).unwrap(), ea.title));
+        std::fs::write(&taken, "other").unwrap();
         set_hidden(&out, &[b.to_string()], true).unwrap();
-        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 1, "manually hidden stays out");
-        let q: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(bridge.join("log-queue.json")).unwrap()).unwrap();
-        assert_eq!(q["items"][0]["vtt"], a);
-        // the skill drops one receipt per success; a half-written one is left alone
-        std::fs::create_dir_all(bridge.join("logged")).unwrap();
-        std::fs::write(bridge.join("logged/1-1.json"), format!(r#"{{"vtt":"{a}"}}"#)).unwrap();
-        std::fs::write(bridge.join("logged/1-2.json"), "{half").unwrap();
-        assert_eq!(ingest_logged(&out, &bridge).unwrap(), 1);
-        let e = &load_state(&out).entries[a];
+        let rules = [rule(&both, true, Some(&today_utc()))];
+        assert_eq!(auto_add_to_raw(&out, &raw, &rules).unwrap(), 1, "hidden stays out");
+        let e = load_state(&out).entries[a].clone();
         assert!(e.logged && e.hidden && e.hidden_reason.as_deref() == Some("logged"));
-        assert!(!bridge.join("logged/1-1.json").exists() && bridge.join("logged/1-2.json").exists());
-        assert_eq!(write_log_queue(&out, &rules, &bridge).unwrap(), 0);
+        let stub = e.raw_note.clone().unwrap();
+        assert_ne!(Path::new(&stub), taken.as_path());
+        assert_eq!(std::fs::read_to_string(&taken).unwrap(), "other");
+        let text = std::fs::read_to_string(&stub).unwrap();
+        assert!(text.contains("type: transcript-ref") && text.contains(&serde_json::to_string(e.md_path.as_deref().unwrap()).unwrap()));
+        assert_eq!(auto_add_to_raw(&out, &raw, &rules).unwrap(), 0, "rerun is a no-op");
+        // manual add; duplicates and repeats are skipped; a missing raw folder errors without touching state
+        assert_eq!(add_to_raw(&out, &raw, &[b.to_string(), a.to_string()]).unwrap(), (1, 1));
+        assert!(add_to_raw(&out, &d.join("nope"), &[a.to_string()]).is_err());
+        // moving the transcript rewrites the stub's pointer
+        assert_eq!(move_selected(&out, &[a.to_string()], &dest).unwrap().moved, 1);
+        let moved = load_state(&out).entries[a].md_path.clone().unwrap();
+        assert!(std::fs::read_to_string(&stub).unwrap().contains(&serde_json::to_string(&moved).unwrap()));
         std::fs::remove_dir_all(&d).ok();
     }
 
@@ -1326,7 +1420,7 @@ mod tests {
             std::fs::write(src.join(n), vtt(&format!("body {i} unique words here"))).unwrap();
         }
         scan(&src, &out, &Rules::embedded()).unwrap();
-        let rule = crate::config::AutoRule { id: "v".into(), action: "voc".into(), enabled: true, dest: None, mode: "exclude".into(), categories: vec![], after_days: 0 };
+        let rule = crate::config::AutoRule { id: "v".into(), action: "voc".into(), enabled: true, dest: None, mode: "exclude".into(), categories: vec![], after_days: 0, since: None };
         let rules = [rule];
         let n0 = write_voc_queue(&out, &rules, &bridge).unwrap();
         let q: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(bridge.join("voc-queue.json")).unwrap()).unwrap();
@@ -1335,12 +1429,9 @@ mod tests {
         set_voc_skip(&out, &[names[0].to_string()], true).unwrap();
         mark_voc(&out, &[names[1].to_string()]).unwrap();
         assert!(write_voc_queue(&out, &rules, &bridge).unwrap() < n0, "skipped and ingested rows drop out");
-        // a voc receipt sets the badge without hiding
-        std::fs::create_dir_all(bridge.join("logged")).unwrap();
-        std::fs::write(bridge.join("logged/1-1.json"), format!(r#"{{"vtt":"{}","kind":"voc"}}"#, names[2])).unwrap();
-        assert_eq!(ingest_logged(&out, &bridge).unwrap(), 1);
-        let e = &load_state(&out).entries[names[2]];
-        assert!(e.voc_ingested && !e.hidden && !e.logged);
+        let ready = voc_ready(&out, &rules);
+        assert!(!ready.contains(&names[0].to_string()) && !ready.contains(&names[1].to_string()), "skipped and ingested rows are not offered");
+        assert!(ready.len() <= VOC_MAX_PER_RUN);
         std::fs::remove_dir_all(&d).ok();
     }
 

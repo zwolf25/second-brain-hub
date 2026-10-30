@@ -25,12 +25,20 @@ pub struct AppConfig {
     /// The user confirmed that automatic VoC copies transcripts (with attendee names) into the shared vault.
     #[serde(default)]
     pub voc_consent: bool,
+    /// The user dismissed the one-time "add future transcripts automatically?" offer.
+    #[serde(default)]
+    pub raw_stub_offer_dismissed: bool,
+    /// Old `log-it` rules were given a `since` date once, so upgrading never mass-writes raw notes.
+    #[serde(default)]
+    pub raw_stub_migrated: bool,
     /// Ordered rules run at the end of each transcripts scan; the first matching rule claims a file.
     #[serde(default)]
     pub auto_rules: Vec<AutoRule>,
 }
 
-/// One automatic action on converted transcripts. Only `action: "move"` runs inside the Hub;
+/// One automatic action on converted transcripts, all run inside the Hub (no scheduled Claude task):
+/// "move" relocates the `.md`, "log-it" (shown as "Add to Second Brain"; id kept for config compatibility)
+/// writes a raw-note stub, "voc" flags the row for a user-triggered VoC run.
 /// `mode` is "include" or "exclude" over `categories`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AutoRule {
@@ -42,6 +50,9 @@ pub struct AutoRule {
     pub categories: Vec<String>,
     /// Only files converted at least this many days ago (0 = right away).
     pub after_days: u64,
+    /// Only files converted on or after this ISO date (`None` = no lower bound).
+    #[serde(default)]
+    pub since: Option<String>,
 }
 
 fn config_file(config_dir: &Path) -> PathBuf {
@@ -50,10 +61,17 @@ fn config_file(config_dir: &Path) -> PathBuf {
 
 pub fn load(config_dir: &Path) -> AppConfig {
     let path = config_file(config_dir);
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    // Only a config that parsed is migrated and re-saved; an unreadable one is never overwritten.
+    let Some(mut cfg) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<AppConfig>(&s).ok()) else {
+        return AppConfig::default();
+    };
+    if !cfg.raw_stub_migrated {
+        let today = crate::transcripts::today_utc();
+        cfg.auto_rules.iter_mut().filter(|r| r.action == "log-it" && r.since.is_none()).for_each(|r| r.since = Some(today.clone()));
+        cfg.raw_stub_migrated = true;
+        let _ = save(config_dir, &cfg);
+    }
+    cfg
 }
 
 pub fn save(config_dir: &Path, config: &AppConfig) -> Result<()> {

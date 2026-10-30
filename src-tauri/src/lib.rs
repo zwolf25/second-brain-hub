@@ -282,7 +282,7 @@ fn scan_transcripts(app: &AppHandle) {
         Err(e) => tracing::warn!("transcripts scan failed: {e:#}"),
     }
     run_auto_move(&state);
-    sync_log_bridge(&state);
+    sync_raw_stubs(&state);
     let _ = app.emit("transcripts-updated", ());
 }
 
@@ -300,19 +300,20 @@ fn run_auto_move(state: &AppState) {
     };
 }
 
-/// Hands log-it work to the `transcript-log` skill: collects its receipts first, then rewrites the queue.
-/// Caller holds `transcripts_scan`. Failures only log; the next scan retries.
-fn sync_log_bridge(state: &AppState) {
-    let Some(bridge) = transcripts::bridge_dir() else { return };
-    let rules = state.config.lock().unwrap().auto_rules.clone();
-    if let Err(e) = transcripts::ingest_logged(&state.transcripts_dir, &bridge) {
-        tracing::warn!("ingest log-it receipts: {e:#}");
-    }
-    if rules.iter().any(|r| r.action == "log-it") || bridge.join("log-queue.json").exists() {
-        if let Err(e) = transcripts::write_log_queue(&state.transcripts_dir, &rules, &bridge) {
-            tracing::warn!("write log-it queue: {e:#}");
+/// Writes raw-note stubs for the auto "Add to Second Brain" rules, then refreshes the VoC hand-off file.
+/// Caller holds `transcripts_scan`. Failures only log; the next scan retries. No Claude task is involved.
+fn sync_raw_stubs(state: &AppState) {
+    let (rules, raw) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.auto_rules.clone(), cfg.raw_path.clone())
+    };
+    if let Some(raw) = raw {
+        if let Err(e) = transcripts::auto_add_to_raw(&state.transcripts_dir, &raw, &rules) {
+            tracing::warn!("auto raw notes: {e:#}");
         }
     }
+    let Some(bridge) = transcripts::bridge_dir() else { return };
+    let _ = std::fs::remove_file(bridge.join("log-queue.json")); // left by 0.7.x; nothing reads it any more
     if rules.iter().any(|r| r.action == "voc") || bridge.join("voc-queue.json").exists() {
         if let Err(e) = transcripts::write_voc_queue(&state.transcripts_dir, &rules, &bridge) {
             tracing::warn!("write voc queue: {e:#}");
@@ -572,11 +573,27 @@ fn set_transcripts_hidden(state: State<Arc<AppState>>, vtts: Vec<String>, hidden
     transcripts::set_hidden(&state.transcripts_dir, &vtts, hidden).map_err(|e| e.to_string())
 }
 
-/// Called after the log-it deep link opens; marks the transcripts logged and hides them.
+/// "Add to Second Brain": writes a raw-note stub per transcript and hides it. Returns (written, skipped).
 #[tauri::command]
-fn mark_transcripts_logged(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
+fn add_transcripts_to_raw(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(usize, usize), String> {
+    let raw = state.config.lock().unwrap().raw_path.clone().ok_or("Choose your raw folder in Settings first.")?;
     let _guard = state.transcripts_scan.lock().unwrap();
-    transcripts::mark_logged(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
+    transcripts::add_to_raw(&state.transcripts_dir, &raw, &vtts).map_err(|e| format!("{e:#}"))
+}
+
+/// Transcripts an enabled VoC rule has flagged, for the "ready for VoC" button.
+#[tauri::command]
+fn get_voc_ready(state: State<Arc<AppState>>) -> Vec<String> {
+    let rules = state.config.lock().unwrap().auto_rules.clone();
+    transcripts::voc_ready(&state.transcripts_dir, &rules)
+}
+
+/// The one-time "add future transcripts automatically?" offer was answered.
+#[tauri::command]
+fn dismiss_raw_stub_offer(state: State<Arc<AppState>>) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.raw_stub_offer_dismissed = true;
+    config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
 
 /// Called after the VoC deep link opens; badge only.
@@ -615,8 +632,11 @@ fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String
 /// Saves the whole ordered rule list and applies it once right away.
 #[tauri::command]
 fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
-    if let Some(bad) = rules.iter().find(|r| !["move", "log-it", "voc"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none())) {
-        return Err(format!("Rule {} is incomplete (a move rule needs a folder).", bad.id));
+    let no_raw = state.config.lock().unwrap().raw_path.is_none();
+    if let Some(bad) = rules.iter().find(|r| {
+        !["move", "log-it", "voc"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none()) || (r.action == "log-it" && r.enabled && no_raw)
+    }) {
+        return Err(format!("Rule {} is incomplete (a move rule needs a folder; \"Add to Second Brain\" needs your raw folder set in Settings).", bad.id));
     }
     {
         let mut cfg = state.config.lock().unwrap();
@@ -627,7 +647,7 @@ fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config
         let state = app.state::<Arc<AppState>>();
         let _guard = state.transcripts_scan.lock().unwrap();
         run_auto_move(&state);
-        sync_log_bridge(&state);
+        sync_raw_stubs(&state);
         let _ = app.emit("transcripts-updated", ());
     });
     Ok(())
@@ -660,13 +680,6 @@ fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
 
 #[tauri::command]
 fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
-    // Receipts from a skill run show up as soon as the page is opened, not only on the next scan.
-    {
-        let _guard = state.transcripts_scan.lock().unwrap();
-        if let Some(b) = transcripts::bridge_dir() {
-            let _ = transcripts::ingest_logged(&state.transcripts_dir, &b);
-        }
-    }
     transcripts::rows(&state.transcripts_dir)
 }
 
@@ -922,7 +935,9 @@ pub fn run() {
             get_move_error,
             get_autostart,
             set_autostart,
-            mark_transcripts_logged,
+            add_transcripts_to_raw,
+            get_voc_ready,
+            dismiss_raw_stub_offer,
             get_transcript_categories,
             get_voc_category,
             set_voc_consent,

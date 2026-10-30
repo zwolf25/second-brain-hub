@@ -389,6 +389,10 @@ async function loadTranscripts() {
     invoke("get_voc_category"),
   ]);
   bulkCatSelect.innerHTML = categoryOptions("");
+  vocReady = await invoke("get_voc_ready");
+  const vocBanner = document.querySelector("#transcripts-voc-ready");
+  vocBanner.classList.toggle("hidden", !vocReady.length);
+  document.querySelector("#transcripts-voc-ready-text").textContent = `${vocReady.length} transcript(s) flagged for VoC by your rule. Nothing runs until you click.`;
   document.querySelector("#transcripts-privacy").classList.toggle("hidden", !auditStatus.enabled);
   renderTranscripts();
   moveError();
@@ -446,28 +450,34 @@ async function hideTranscripts(vtts, hidden) {
   await loadTranscripts();
 }
 
-// One launch per click, capped so the deep-link URL stays short. Duplicates and
-// not-yet-converted rows are skipped. Marked logged (and hidden) optimistically:
-// the deep link cannot confirm completion; Unhide makes a transcript eligible again.
-const LOGIT_MAX = 10;
-async function logitTranscripts(vtts) {
-  const rows = transcriptRows.filter((r) => vtts.includes(r.vtt) && !r.duplicate_of && r.md_exists && r.open_path);
-  if (!rows.length) return transcriptsNotice("Nothing to log: select converted, non-duplicate transcripts.");
-  const batch = rows.slice(0, LOGIT_MAX);
-  const files = batch.map((r) => r.open_path);
-  const prompt =
-    files.length === 1
-      ? `/log-it ${files[0]}`
-      : `Run /log-it in file-argument mode on each of these transcript files, one after another:\n${files.join("\n")}`;
+// Writes a raw-note stub per transcript (no Claude, no tokens) and hides the row; /wiki-builder reads the transcript later.
+// The first time, offers to do this automatically for future transcripts.
+async function addToRaw(vtts) {
   try {
-    await openUrl(`claude://code/new?q=${encodeURIComponent(prompt)}`);
-  } catch (err) {
-    return messageDialog(`Couldn't open Claude Desktop:\n${err}`, { title: "Run log-it", kind: "error" });
+    const [added, skipped] = await invoke("add_transcripts_to_raw", { vtts });
+    vtts.forEach((v) => selectedTranscripts.delete(v));
+    await loadTranscripts();
+    transcriptsNotice(
+      added
+        ? `Added ${added} to your raw notes${skipped ? `, ${skipped} skipped (duplicates, unconverted or already added)` : ""}. Run /wiki-builder to fold ${added === 1 ? "it" : "them"} in.`
+        : "Nothing added: select converted, non-duplicate transcripts that aren't added yet.",
+    );
+    if (added) await offerRawRule();
+  } catch (e) {
+    messageDialog(`${e}`, { title: "Couldn't add to Second Brain", kind: "error" });
   }
-  batch.forEach((r) => selectedTranscripts.delete(r.vtt));
-  await invoke("mark_transcripts_logged", { vtts: batch.map((r) => r.vtt) });
-  await loadTranscripts();
-  transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to log-it; select the rest and run again.` : `Sent ${batch.length} to log-it.`);
+}
+
+async function offerRawRule() {
+  const config = await invoke("get_config");
+  if (config.raw_stub_offer_dismissed || (config.auto_rules ?? []).some((r) => r.action === "log-it")) return;
+  const yes = await confirmDialog("Add future transcripts to your raw notes automatically? You choose which categories. Nothing runs in Claude; /wiki-builder picks them up when you run it.", {
+    title: "Automate this?",
+    okLabel: "Set up rule",
+    cancelLabel: "Not now",
+  });
+  await invoke("dismiss_raw_stub_offer");
+  if (yes) openRuleModal(-1, "log-it");
 }
 
 // Interactive: voc-library-ingest shows its batch summary and waits for approval before writing to the shared
@@ -492,18 +502,21 @@ async function vocTranscripts(vtts) {
   transcriptsNotice(rows.length > LOGIT_MAX ? `Sent ${LOGIT_MAX} of ${rows.length} to VoC; select the rest and run again.` : `Sent ${batch.length} to VoC.`);
 }
 
+const LOGIT_MAX = 10; // one VoC launch per click, capped so the deep-link URL stays short
+let vocReady = [];
+document.querySelector("#transcripts-voc-ready-btn").addEventListener("click", () => vocTranscripts(vocReady));
 const selectedList = () => [...selectedTranscripts];
 document.querySelector("#transcripts-voc-sel").addEventListener("click", () => vocTranscripts(selectedList()));
 document.querySelector("#transcripts-move-sel").addEventListener("click", () => moveTranscripts(selectedList()));
 document.querySelector("#transcripts-hide-sel").addEventListener("click", () => hideTranscripts(selectedList(), !selectionAllHidden()));
-document.querySelector("#transcripts-logit-sel").addEventListener("click", () => logitTranscripts(selectedList()));
+document.querySelector("#transcripts-logit-sel").addEventListener("click", () => addToRaw(selectedList()));
 
 transcriptsList.addEventListener("click", (e) => {
   const btn = e.target.closest(".t-expand");
   if (btn) toggleTranscriptDetail(btn.closest(".transcript-row").dataset.vtt);
 });
 
-// Per-row "⋯" menu: Open, Move…, Run log-it, Hide/Unhide for that one transcript.
+// Per-row "⋯" menu: Open, Move…, Add to Second Brain, Hide/Unhide for that one transcript.
 const rowMenu = document.querySelector("#row-menu");
 const closeRowMenu = () => rowMenu.classList.add("hidden");
 transcriptsList.addEventListener("click", (e) => {
@@ -515,7 +528,7 @@ transcriptsList.addEventListener("click", (e) => {
   if (!r) return;
   const items = [["open", "Open"]];
   if (!r.duplicate_of) {
-    items.push(["move", "Move…"], ["logit", "Run log-it"]);
+    items.push(["move", "Move…"], ["logit", "Add to Second Brain"]);
     if (isVoc(r)) items.push(["voc", "Process VoC"]);
     // Skip/Queue only mean something once an automatic VoC rule is on.
     if (isVoc(r) && autoRules.some((x) => x.enabled && x.action === "voc")) items.push(r.voc_skip ? ["vocallow", "Queue for Auto VoC"] : ["vocskip", "Skip Auto VoC"]);
@@ -535,7 +548,7 @@ rowMenu.addEventListener("click", (e) => {
   closeRowMenu();
   if (act === "open") openTranscript(vtt);
   else if (act === "move") moveTranscripts([vtt]);
-  else if (act === "logit") logitTranscripts([vtt]);
+  else if (act === "logit") addToRaw([vtt]);
   else if (act === "voc") vocTranscripts([vtt]);
   else if (act === "vocskip" || act === "vocallow") invoke("set_transcripts_voc_skip", { vtts: [vtt], skip: act === "vocskip" }).then(loadTranscripts);
   else hideTranscripts([vtt], act === "hide");
@@ -548,6 +561,9 @@ let autoRules = [];
 const ruleModal = document.querySelector("#rule-modal");
 const rf = {
   action: document.querySelector("#rule-action"),
+  existingField: document.querySelector("#rule-existing-field"),
+  existing: document.querySelector("#rule-existing"),
+  since: null, // the saved rule's `since`, kept when editing without ticking "already converted"
   destField: document.querySelector("#rule-dest-field"),
   dest: document.querySelector("#rule-dest"),
   mode: document.querySelector("#rule-mode"),
@@ -563,8 +579,8 @@ let vocConsent = false;
 const saveRules = async (rules) => {
   if (!vocConsent && rules.some((r) => r.enabled && r.action === "voc")) {
     const ok = await confirmDialog(
-      "Automatic VoC copies matching transcripts, including attendee names, into the shared VoC library that your team can read. Nothing outside the VoC category is processed, and up to 5 run per pass.\n\nTurn it on?",
-      { title: "Automatic VoC", okLabel: "Turn on", cancelLabel: "Cancel" },
+      "Flagging VoC transcripts runs nothing by itself. When you click Process VoC, the VoC skill copies up to 5 flagged transcripts, including attendee names, into the shared VoC library that your team can read, after you approve its summary. Only the VoC category is flagged.\n\nTurn it on?",
+      { title: "Flag for VoC", okLabel: "Turn on", cancelLabel: "Cancel" },
     );
     if (!ok) return;
     await invoke("set_voc_consent", { on: true });
@@ -582,6 +598,8 @@ const ruleFromForm = () => ({
   mode: rf.mode.value,
   categories: [...rf.cats.querySelectorAll("input:checked")].map((i) => i.value),
   after_days: Math.max(0, parseInt(rf.days.value, 10) || 0),
+  // "Add to Second Brain" covers only newly converted transcripts unless the box is ticked, so a new rule never back-fills history.
+  since: rf.action.value !== "log-it" || rf.existing.checked ? null : (rf.since ?? new Date().toISOString().slice(0, 10)),
 });
 async function refreshRulePreview() {
   const rule = ruleFromForm();
@@ -589,13 +607,15 @@ async function refreshRulePreview() {
   const list = rf.editing >= 0 ? autoRules.map((r, i) => (i === idx ? rule : r)) : [...autoRules, rule];
   const n = rule.action === "move" && !rule.dest ? null : await invoke("preview_auto_rule", { rules: list, idx });
   rf.preview.textContent =
-    n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be queued for VoC" }[rule.action] ?? "be queued for log-it"} when this rule is on.`;
+    n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be flagged for VoC" }[rule.action] ?? "be added to your raw notes"} when this rule is on.`;
 }
-async function openRuleModal(index) {
+async function openRuleModal(index, presetAction) {
   const cats = await invoke("get_transcript_categories");
-  const r = index >= 0 ? autoRules[index] : { id: crypto.randomUUID().slice(0, 8), enabled: true, dest: null, mode: "include", categories: [], after_days: 0 };
-  Object.assign(rf, { editing: index, id: r.id, enabled: r.enabled, destPath: r.dest });
+  const r = index >= 0 ? autoRules[index] : { id: crypto.randomUUID().slice(0, 8), enabled: true, dest: null, mode: "include", categories: [], after_days: 0, since: null, action: presetAction };
+  Object.assign(rf, { editing: index, id: r.id, enabled: r.enabled, destPath: r.dest, since: r.since ?? null });
   rf.action.value = r.action || "move";
+  rf.existing.checked = index >= 0 && !r.since;
+  rf.existingField.classList.toggle("hidden", rf.action.value !== "log-it");
   rf.destField.classList.toggle("hidden", rf.action.value !== "move");
   rf.dest.textContent = r.dest ?? "no folder chosen";
   rf.mode.value = r.mode;
@@ -631,13 +651,15 @@ document.querySelector("#rule-dest-btn").addEventListener("click", async () => {
 rf.action.addEventListener("change", () => {
   renderRuleCats([...rf.cats.querySelectorAll("input:checked")].map((i) => i.value));
   rf.destField.classList.toggle("hidden", rf.action.value !== "move");
+  rf.existingField.classList.toggle("hidden", rf.action.value !== "log-it");
   refreshRulePreview();
 });
-[rf.mode, rf.days, rf.cats].forEach((el) => el.addEventListener("change", refreshRulePreview));
+[rf.mode, rf.days, rf.cats, rf.existing].forEach((el) => el.addEventListener("change", refreshRulePreview));
 document.querySelector("#rule-save").addEventListener("click", async () => {
   const rule = ruleFromForm();
   const warn = (m) => messageDialog(m, { title: "Can't save rule", kind: "warning" });
   if (rule.action === "move" && !rule.dest) return warn("Choose a destination folder first.");
+  if (rule.action === "log-it" && !(await invoke("get_config")).raw_path) return warn("Choose your raw folder in Settings first.");
   if (!rule.categories.length && rule.mode === "include") return warn("Tick at least one category, or switch to \"Everything except these categories\".");
   const rules = [...autoRules];
   if (rf.editing >= 0) rules[rf.editing] = rule;
@@ -659,7 +681,7 @@ function renderAutoRules() {
     row.className = "auto-rule-row";
     row.innerHTML = `
       <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
-      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Process VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Log-it</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Flag for VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Add to Second Brain</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
       <button class="topbar-btn rule-edit">Edit</button>
       <button class="topbar-btn rule-del">Delete</button>`;
     row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));
