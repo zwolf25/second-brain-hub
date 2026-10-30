@@ -1066,3 +1066,16 @@ label.transcripts-toggle {
   order: 11;
   margin-left: 0.8em;
 }
+
+.transcripts-search {
+  flex: 0 1 18em;
+  min-width: 8em;
+  margin-left: 0.75em;
+}
+.transcripts-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  padding: 0.5em 0;
+}

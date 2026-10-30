@@ -816,7 +816,9 @@ pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveRep
 fn in_scope(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
     let listed = rule.categories.contains(&e.category);
     let in_scope = if rule.mode == "exclude" { !listed } else { listed };
-    let old_enough = e.converted_at.as_deref().is_some_and(|d| today >= crate::audit::days_since_epoch(d) + rule.after_days);
+    // "hide" ages by the meeting date, so history converted today is still old; other rules wait after conversion.
+    let aged_from = if rule.action == "hide" { e.date.as_deref().or(e.converted_at.as_deref()) } else { e.converted_at.as_deref() };
+    let old_enough = aged_from.is_some_and(|d| today >= crate::audit::days_since_epoch(d) + rule.after_days);
     let since = rule.since.as_deref().is_none_or(|s| e.converted_at.as_deref().is_some_and(|d| d >= s));
     in_scope && old_enough && since
 }
@@ -976,7 +978,7 @@ pub fn auto_add_to_raw(out: &Path, raw: &Path, rules: &[crate::config::AutoRule]
     stub_entries(out, raw, |_, e| !e.logged && !e.hidden && e.raw_note.is_none() && stub_rules.iter().any(|r| in_scope(r, e, today))).map(|(w, _)| w)
 }
 
-/// Auto rules: hides visible transcripts an enabled "hide" rule covers (converted `after_days` ago or more). Each row is
+/// Auto rules: hides visible transcripts an enabled "hide" rule covers (meeting dated `after_days` ago or more). Each row is
 /// auto-hidden once (`auto_hid`), so a later Unhide sticks. Runs last in a scan, after stubs, so nothing is hidden before
 /// an "Add to Second Brain" rule has seen it. Returns the number hidden.
 pub fn auto_hide(out: &Path, rules: &[crate::config::AutoRule]) -> Result<usize> {
@@ -1439,12 +1441,12 @@ mod tests {
         let d = std::env::temp_dir().join(format!("tr-autohide-{}", std::process::id()));
         let (src, out) = (d.join("src"), d.join("out"));
         std::fs::create_dir_all(&src).unwrap();
-        let n = "Weekly Release Management-20260101_100000-Meeting Recording.vtt";
+        let n = "Weekly Release Management_2026-01-01_10-00_Transcript.vtt";
         std::fs::write(src.join(n), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>hide me body words</v>\n").unwrap();
         scan(&src, &out, &Rules::embedded()).unwrap_or_else(|e| panic!("{e:#}"));
         let rule = |days| crate::config::AutoRule { id: "h".into(), action: "hide".into(), enabled: true, dest: None, mode: "exclude".into(), categories: vec![], after_days: days, since: None };
-        assert_eq!(auto_hide(&out, &[rule(30)]).unwrap(), 0, "converted today is not older than 30 days");
-        assert_eq!(auto_hide(&out, &[rule(0)]).unwrap(), 1);
+        assert_eq!(auto_hide(&out, &[rule(100_000)]).unwrap(), 0, "meeting is not that old");
+        assert_eq!(auto_hide(&out, &[rule(30)]).unwrap(), 1, "converted today but the meeting date is old");
         let e = load_state(&out).entries[n].clone();
         assert!(e.hidden && e.auto_hid && e.hidden_reason.as_deref() == Some("auto"));
         set_hidden(&out, &[n.to_string()], false).unwrap();

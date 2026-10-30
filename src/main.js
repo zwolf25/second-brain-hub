@@ -318,20 +318,35 @@ function toggleTranscriptDetail(vtt) {
   transcriptsList.querySelector(`.transcript-row[data-vtt="${CSS.escape(vtt)}"]`)?.focus();
 }
 
+const TRANSCRIPTS_PAGE = 50;
+let transcriptsPage = 0;
+const transcriptsSearch = document.querySelector("#transcripts-search");
+
 function renderTranscripts() {
   const scroll = transcriptsList.scrollTop;
   const dups = transcriptRows.filter((r) => r.duplicate_of);
   const hiddenCount = transcriptRows.filter((r) => r.hidden && !r.duplicate_of).length;
   document.querySelector("#transcripts-hidden-label").textContent = `Show hidden (${hiddenCount})`;
+  const q = transcriptsSearch.value.trim().toLowerCase();
+  const matches = (r) =>
+    !q || [r.title, r.date, r.category, r.header?.summary, ...(r.header?.actions ?? [])].some((t) => t?.toLowerCase().includes(q));
   const shown = transcriptRows.filter(
-    (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of),
+    (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of) && matches(r),
   );
+  const pages = Math.max(1, Math.ceil(shown.length / TRANSCRIPTS_PAGE));
+  transcriptsPage = Math.min(transcriptsPage, pages - 1);
+  const pageRows = shown.slice(transcriptsPage * TRANSCRIPTS_PAGE, (transcriptsPage + 1) * TRANSCRIPTS_PAGE);
+  document.querySelector("#transcripts-pager").classList.toggle("hidden", pages < 2);
+  document.querySelector("#transcripts-page").textContent = `Page ${transcriptsPage + 1} of ${pages} · ${shown.length} transcripts`;
+  document.querySelector("#transcripts-prev").disabled = transcriptsPage === 0;
+  document.querySelector("#transcripts-next").disabled = transcriptsPage >= pages - 1;
   // Identical content on a later date means Teams saved the wrong transcript, so the real one is missing.
   const meetings = new Set(dups.map((r) => r.duplicate_of)).size;
   transcriptsDupsLabel.textContent = `Suspect downloads (${dups.length})`;
   transcriptsDupsLabel.parentElement.title = dups.length ? `${dups.length} files across ${meetings} meetings are identical to an earlier one — Teams likely saved the wrong transcript, so the real one is missing.` : "";
   transcriptsStatus.textContent =
     `${transcriptRows.length - dups.length - hiddenCount} transcripts` +
+    (q ? ` · ${shown.length} match` : "") +
     moveErrorText +
     (auditStatus.stuck_days >= 3 ? ` · ⚠ category log not reaching the shared drive for ${auditStatus.stuck_days} days` : "");
   const labelOf = (vtt) => {
@@ -340,7 +355,7 @@ function renderTranscripts() {
   };
   for (const v of [...selectedTranscripts]) if (!shown.some((r) => r.vtt === v)) selectedTranscripts.delete(v);
   transcriptsList.innerHTML = "";
-  for (const r of shown) {
+  for (const r of pageRows) {
     const li = document.createElement("li");
     li.className = `skill-row transcript-row${r.duplicate_of ? " is-dup" : ""}`;
     li.tabIndex = 0;
@@ -609,6 +624,8 @@ async function refreshRulePreview() {
   rf.preview.textContent =
     n === null ? "Choose a folder first." : `${n} existing file(s) would ${{ move: "move", voc: "be flagged for VoC", hide: "be hidden" }[rule.action] ?? "be added to your raw notes"} when this rule is on.`;
 }
+const setDaysLabel = () =>
+  (document.querySelector("#rule-days-label").textContent = rf.action.value === "hide" ? "since the meeting date" : "after conversion (0 = right away)");
 async function openRuleModal(index, presetAction) {
   const cats = await invoke("get_transcript_categories");
   const r = index >= 0 ? autoRules[index] : { id: crypto.randomUUID().slice(0, 8), enabled: true, dest: null, mode: "include", categories: [], after_days: 0, since: null, action: presetAction };
@@ -620,6 +637,7 @@ async function openRuleModal(index, presetAction) {
   rf.dest.textContent = r.dest ?? "no folder chosen";
   rf.mode.value = r.mode;
   rf.days.value = r.after_days;
+  setDaysLabel();
   rf.allCats = cats;
   rf.vocCat = await invoke("get_voc_category");
   renderRuleCats(r.categories);
@@ -653,6 +671,7 @@ rf.action.addEventListener("change", () => {
   rf.destField.classList.toggle("hidden", rf.action.value !== "move");
   rf.existingField.classList.toggle("hidden", rf.action.value !== "log-it");
   if (rf.action.value === "hide" && !parseInt(rf.days.value, 10)) rf.days.value = 30;
+  setDaysLabel();
   refreshRulePreview();
 });
 [rf.mode, rf.days, rf.cats, rf.existing].forEach((el) => el.addEventListener("change", refreshRulePreview));
@@ -682,7 +701,7 @@ function renderAutoRules() {
     row.className = "auto-rule-row";
     row.innerHTML = `
       <input type="checkbox" class="rule-on" aria-label="Enabled"${r.enabled ? " checked" : ""} />
-      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Flag for VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Add to Second Brain</strong> ${escapeHtml(what)}` : r.action === "hide" ? `<strong>Hide</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · after ${r.after_days} d` : ""}</span>
+      <span class="auto-rule-text">${r.action === "voc" ? `<strong>Flag for VoC</strong> ${escapeHtml(what)}` : r.action === "log-it" ? `<strong>Add to Second Brain</strong> ${escapeHtml(what)}` : r.action === "hide" ? `<strong>Hide</strong> ${escapeHtml(what)}` : `<strong>Move</strong> ${escapeHtml(what)} → <span class="muted">${escapeHtml(r.dest ?? "")}</span>`}${r.after_days ? ` · ${r.action === "hide" ? "older than" : "after"} ${r.after_days} d` : ""}</span>
       <button class="topbar-btn rule-edit">Edit</button>
       <button class="topbar-btn rule-del">Delete</button>`;
     row.querySelector(".rule-on").addEventListener("change", (e) => saveRules(autoRules.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x))));
@@ -748,8 +767,23 @@ transcriptsList.addEventListener("keydown", (e) => {
     toggleTranscriptDetail(li.dataset.vtt);
   }
 });
-transcriptsShowDups.addEventListener("change", renderTranscripts);
-transcriptsShowHidden.addEventListener("change", renderTranscripts);
+const resetPage = () => {
+  transcriptsPage = 0;
+  renderTranscripts();
+};
+transcriptsShowDups.addEventListener("change", resetPage);
+transcriptsShowHidden.addEventListener("change", resetPage);
+transcriptsSearch.addEventListener("input", resetPage);
+document.querySelector("#transcripts-prev").addEventListener("click", () => {
+  transcriptsPage--;
+  renderTranscripts();
+  transcriptsList.scrollTop = 0;
+});
+document.querySelector("#transcripts-next").addEventListener("click", () => {
+  transcriptsPage++;
+  renderTranscripts();
+  transcriptsList.scrollTop = 0;
+});
 
 document.querySelector("#transcripts-setup-btn").addEventListener("click", async () => {
   const found = await invoke("autodetect_transcripts");

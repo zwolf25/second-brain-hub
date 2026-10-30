@@ -212,6 +212,7 @@
           <button id="transcripts-back-btn" class="topbar-btn" title="Back to search">← Back</button>
           <span class="viewer-title">Transcripts</span>
           <span id="transcripts-status" class="map-stats"></span>
+          <input id="transcripts-search" type="search" class="transcripts-search" placeholder="Search names and summaries…" aria-label="Search transcripts" />
           <label class="transcripts-toggle"><input id="transcripts-show-dups" type="checkbox" /> <span id="transcripts-dups-label">Suspect downloads</span></label>
           <label class="transcripts-toggle"><input id="transcripts-show-hidden" type="checkbox" /> <span id="transcripts-hidden-label">Show hidden</span></label>
           <button id="transcripts-rules-btn" class="topbar-btn transcripts-toggle" title="Manage auto rules in Settings">Auto rules…</button>
@@ -242,6 +243,11 @@
           <button id="transcripts-voc-ready-btn" class="topbar-btn">Process VoC</button>
         </p>
         <ul id="transcripts-list" class="skills-list"></ul>
+        <div id="transcripts-pager" class="transcripts-pager hidden">
+          <button id="transcripts-prev" class="topbar-btn">← Prev</button>
+          <span id="transcripts-page" class="muted"></span>
+          <button id="transcripts-next" class="topbar-btn">Next →</button>
+        </div>
       </section>
 
       <div id="rule-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
@@ -252,7 +258,7 @@
               <option value="move">Move to a folder</option>
               <option value="log-it">Add to Second Brain (raw note for /wiki-builder)</option>
               <option value="voc">Flag for VoC (you click Process)</option>
-              <option value="hide">Hide old transcripts (default: after 30 days)</option>
+              <option value="hide">Hide old transcripts (default: older than 30 days)</option>
             </select>
           </label>
           <div id="rule-dest-field" class="modal-field">Destination folder
@@ -263,7 +269,7 @@
           </label>
           <div id="rule-cats" class="rule-cats"></div>
           <label id="rule-existing-field" class="modal-field hidden"><span><input id="rule-existing" type="checkbox" /> Also include transcripts already converted (otherwise only new ones from today)</span></label>
-          <label class="modal-field">Wait <input id="rule-days" type="number" min="0" value="0" style="width:4em" /> days after conversion (0 = right away)</label>
+          <label class="modal-field">Wait <input id="rule-days" type="number" min="0" value="0" style="width:4em" /> days <span id="rule-days-label">after conversion (0 = right away)</span></label>
           <p id="rule-preview" class="hint muted"></p>
           <div class="modal-actions">
             <button id="rule-cancel" class="topbar-btn">Cancel</button>
