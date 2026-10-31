@@ -454,6 +454,10 @@ async function moveTranscripts(vtts) {
     vtts.forEach((v) => selectedTranscripts.delete(v));
     await loadTranscripts();
     transcriptsNotice(`Moved ${r.moved}${r.skipped ? `, ${r.skipped} failed` : ""}. Duplicates and missing files are skipped.`);
+    // The row stays in the list after a move, so confirm in a dialog the user can't miss.
+    const where = dest.split(/[\\/]/).filter(Boolean).pop() || dest;
+    const detail = [r.moved ? `Moved ${r.moved} to "${where}".\n${dest}` : "Nothing was moved.", r.skipped ? `${r.skipped} skipped or failed.` : "", ...r.errors].filter(Boolean).join("\n\n");
+    messageDialog(detail, { title: r.moved ? "Moved" : "Nothing moved", kind: r.moved ? "info" : "warning" });
   } catch (e) {
     messageDialog(`${e}`, { title: "Couldn't move", kind: "error" });
   }
