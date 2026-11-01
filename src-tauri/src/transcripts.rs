@@ -1066,6 +1066,8 @@ pub struct Row {
     pub md_exists: bool,
     pub hidden: bool,
     pub hidden_reason: Option<String>,
+    /// "manual" or "auto" once the file was moved out of the output folder.
+    pub moved_by: Option<String>,
     pub voc_ingested: bool,
     pub voc_skip: bool,
     pub header: Option<Header>,
@@ -1097,6 +1099,7 @@ pub fn rows(out: &Path) -> Vec<Row> {
                 open_path: open,
                 hidden: e.hidden,
                 hidden_reason: e.hidden_reason.clone(),
+                moved_by: e.moved_by.clone(),
                 voc_ingested: e.voc_ingested,
                 voc_skip: e.voc_skip,
                 header: e.header.clone(),

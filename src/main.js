@@ -367,6 +367,7 @@ function renderTranscripts() {
         ${r.header ? `<button class="t-expand" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : '<span class="t-expand-gap"></span>'}
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : r.hidden_reason === "auto" ? "Auto-hidden" : "Hidden"}</span>` : ""}
+        ${r.moved_by && r.open_path && !r.duplicate_of ? `<span class="transcript-cat suggested" title="${escapeHtml(r.open_path)}">Moved to ${escapeHtml(r.open_path.split(/[\\/]/).slice(-2, -1)[0] ?? "")}</span>` : ""}
         ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
         ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">Skip Auto VoC</span>' : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
