@@ -627,6 +627,12 @@ fn set_transcripts_voc_skip(state: State<Arc<AppState>>, vtts: Vec<String>, skip
 }
 
 #[tauri::command]
+fn undo_move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<transcripts::MoveReport, String> {
+    let _guard = state.transcripts_scan.lock().unwrap();
+    transcripts::undo_move(&state.transcripts_dir, &vtts).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String) -> Result<transcripts::MoveReport, String> {
     let _guard = state.transcripts_scan.lock().unwrap();
     transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))
@@ -935,6 +941,7 @@ pub fn run() {
             get_transcripts,
             set_transcripts_hidden,
             move_transcripts,
+            undo_move_transcripts,
             set_auto_rules,
             preview_auto_rule,
             get_move_error,

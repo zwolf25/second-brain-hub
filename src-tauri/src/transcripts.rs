@@ -336,9 +336,13 @@ pub struct Entry {
     /// An auto "hide" rule already hid this row once; unhiding it sticks.
     #[serde(default)]
     pub auto_hid: bool,
-    /// "manual" or "auto"; a moved file is never auto-moved again.
+    /// "manual" or "auto"; a moved file is never auto-moved again. "undone" (after Undo) also blocks auto rules
+    /// but shows no "Moved to" badge.
     #[serde(default)]
     pub moved_by: Option<String>,
+    /// Where the `.md` lived before its latest move, so Undo can put it back.
+    #[serde(default)]
+    pub moved_from: Option<String>,
     /// `duplicate_of` was set by the near-duplicate guard (>= NEAR_DUP_MIN shingle overlap), not an exact hash match.
     #[serde(default)]
     pub near: bool,
@@ -642,6 +646,7 @@ pub fn scan(src: &Path, out: &Path, rules: &Rules) -> Result<ScanReport> {
                 if let Some(old) = state.entries.get(&name) {
                     entry.md_path = old.md_path.clone();
                     (entry.hidden, entry.hidden_reason, entry.logged, entry.moved_by, entry.auto_hid) = (old.hidden, old.hidden_reason.clone(), old.logged, old.moved_by.clone(), old.auto_hid);
+                    entry.moved_from = old.moved_from.clone();
                     (entry.voc_ingested, entry.voc_skip) = (old.voc_ingested, old.voc_skip);
                     if !migrating || entry.header.is_some() || old.title != entry.title {
                         reconvert.insert(name.clone());
@@ -739,6 +744,8 @@ pub fn set_voc_skip(out: &Path, vtts: &[String], skip: bool) -> Result<()> {
 pub struct MoveReport {
     pub moved: usize,
     pub skipped: usize,
+    /// Names actually moved, so Undo never touches a row this batch skipped.
+    pub moved_vtts: Vec<String>,
     /// One message per unusable destination (missing folder), for the page banner.
     pub errors: Vec<String>,
 }
@@ -791,10 +798,12 @@ fn move_entries(out: &Path, by: &str, plan: impl Fn(&str, &Entry) -> Option<Path
             Ok(to) => {
                 e.md_path = Some(to.to_string_lossy().to_string());
                 e.moved_by = Some(by.into());
+                e.moved_from = Some(md.clone());
                 if let Some(stub) = &e.raw_note {
                     patch_stub_path(stub, &to);
                 }
                 report.moved += 1;
+                report.moved_vtts.push(name.clone());
             }
             Err(err) => {
                 tracing::warn!("move {name}: {err:#}");
@@ -811,6 +820,42 @@ fn move_entries(out: &Path, by: &str, plan: impl Fn(&str, &Entry) -> Option<Path
 pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveReport> {
     anyhow::ensure!(dest.is_dir(), "Destination folder is missing: {}", dest.display());
     move_entries(out, "manual", |n, _| vtts.iter().any(|v| v == n).then(|| dest.to_path_buf()))
+}
+
+/// Undo: puts each named transcript's `.md` back in the folder it was moved from. Entries never moved,
+/// or whose old folder is gone, count as skipped (the source is left alone).
+pub fn undo_move(out: &Path, vtts: &[String]) -> Result<MoveReport> {
+    let mut state = load_state(out);
+    let mut report = MoveReport::default();
+    for name in vtts {
+        let Some(e) = state.entries.get_mut(name) else { continue };
+        let (Some(cur), Some(from)) = (e.md_path.clone().filter(|p| Path::new(p).is_file()), e.moved_from.clone()) else {
+            report.skipped += 1;
+            continue;
+        };
+        let Some(dir) = Path::new(&from).parent().filter(|d| d.is_dir()) else {
+            report.errors.push(format!("Original folder is missing: {from}"));
+            report.skipped += 1;
+            continue;
+        };
+        match move_file(Path::new(&cur), dir) {
+            Ok(to) => {
+                e.md_path = Some(to.to_string_lossy().to_string());
+                (e.moved_by, e.moved_from) = (Some("undone".into()), None);
+                if let Some(stub) = &e.raw_note {
+                    patch_stub_path(stub, &to);
+                }
+                report.moved += 1;
+            }
+            Err(err) => {
+                tracing::warn!("undo move {name}: {err:#}");
+                report.skipped += 1;
+            }
+        }
+    }
+    save_state(out, &state)?;
+    write_index(out, &state)?;
+    Ok(report)
 }
 
 fn in_scope(rule: &crate::config::AutoRule, e: &Entry, today: u64) -> bool {
@@ -1323,6 +1368,28 @@ mod tests {
         assert!(!e.hidden && !e.logged);
         set_hidden(&out, &v, true).unwrap();
         assert_eq!(load_state(&out).entries[&v[0]].hidden_reason.as_deref(), Some("manual"));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn undo_puts_the_file_back_and_blocks_auto_move() {
+        let d = std::env::temp_dir().join(format!("tr-undo-{}", std::process::id()));
+        let (src, out, dest) = (d.join("src"), d.join("out"), d.join("dest"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let a = "Weekly Release Management-20260101_100000-Meeting Recording.vtt";
+        std::fs::write(src.join(a), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>release a</v>\n").unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        let before = load_state(&out).entries[a].md_path.clone().unwrap();
+        assert_eq!(undo_move(&out, &[a.to_string()]).unwrap().skipped, 1, "never moved: nothing to undo");
+        move_selected(&out, &[a.to_string()], &dest).unwrap();
+        assert!(!Path::new(&before).exists());
+        let r = undo_move(&out, &[a.to_string()]).unwrap();
+        assert_eq!(r.moved, 1);
+        let e = &load_state(&out).entries[a];
+        assert_eq!(e.md_path.as_deref(), Some(before.as_str()));
+        assert_eq!((e.moved_by.as_deref(), e.moved_from.as_deref()), (Some("undone"), None));
+        assert!(Path::new(&before).is_file() && dest.read_dir().unwrap().count() == 0);
         std::fs::remove_dir_all(&d).ok();
     }
 

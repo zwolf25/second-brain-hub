@@ -257,6 +257,8 @@ const transcriptsStatus = document.querySelector("#transcripts-status");
 const transcriptsShowDups = document.querySelector("#transcripts-show-dups");
 const transcriptsDupsLabel = document.querySelector("#transcripts-dups-label");
 const transcriptsShowHidden = document.querySelector("#transcripts-show-hidden");
+const transcriptsOnlyMoved = document.querySelector("#transcripts-only-moved");
+const isMoved = (r) => r.moved_by === "manual" || r.moved_by === "auto";
 const transcriptsNotNowBtn = document.querySelector("#transcripts-notnow-btn");
 let transcriptRows = [];
 let transcriptsNoticeTimer = null;
@@ -269,8 +271,19 @@ function applyTranscriptsNav(config) {
 // status-bar note was easy to miss, so a successful Move looked like nothing happened).
 const toastEl = document.querySelector("#toast");
 let toastTimer = null;
-function toast(text, { error = false } = {}) {
+function toast(text, { error = false, action = null } = {}) {
   toastEl.textContent = text;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toastEl.classList.add("hidden");
+      action.run();
+    });
+    toastEl.append(" ", btn);
+  }
   toastEl.classList.toggle("error", error);
   toastEl.classList.remove("hidden");
   clearTimeout(toastTimer);
@@ -341,11 +354,12 @@ function renderTranscripts() {
   const dups = transcriptRows.filter((r) => r.duplicate_of);
   const hiddenCount = transcriptRows.filter((r) => r.hidden && !r.duplicate_of).length;
   document.querySelector("#transcripts-hidden-label").textContent = `Show hidden (${hiddenCount})`;
+  document.querySelector("#transcripts-moved-label").textContent = `Only moved (${transcriptRows.filter((r) => isMoved(r) && !r.duplicate_of).length})`;
   const q = transcriptsSearch.value.trim().toLowerCase();
   const matches = (r) =>
     !q || [r.title, r.date, r.category, r.header?.summary, ...(r.header?.actions ?? [])].some((t) => t?.toLowerCase().includes(q));
   const shown = transcriptRows.filter(
-    (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of) && matches(r),
+    (r) => (transcriptsShowDups.checked || !r.duplicate_of) && (transcriptsShowHidden.checked || !r.hidden || r.duplicate_of) && (!transcriptsOnlyMoved.checked || (isMoved(r) && !r.duplicate_of)) && matches(r),
   );
   const pages = Math.max(1, Math.ceil(shown.length / TRANSCRIPTS_PAGE));
   transcriptsPage = Math.min(transcriptsPage, pages - 1);
@@ -381,7 +395,7 @@ function renderTranscripts() {
         ${r.header ? `<button class="t-expand" aria-label="${expandedTranscripts.has(r.vtt) ? "Hide" : "Show"} AI summary" aria-expanded="${expandedTranscripts.has(r.vtt)}" title="AI summary">${expandedTranscripts.has(r.vtt) ? "▾" : "▸"}</button>` : '<span class="t-expand-gap"></span>'}
         <span class="skill-name">${escapeHtml(r.title)}</span>
         ${r.hidden && !r.duplicate_of ? `<span class="transcript-cat suggested">${r.hidden_reason === "logged" ? "Logged" : r.hidden_reason === "auto" ? "Auto-hidden" : "Hidden"}</span>` : ""}
-        ${r.moved_by && r.open_path && !r.duplicate_of ? `<span class="transcript-cat suggested" title="${escapeHtml(r.open_path)}">Moved to ${escapeHtml(r.open_path.split(/[\\/]/).slice(-2, -1)[0] ?? "")}</span>` : ""}
+        ${(r.moved_by === "manual" || r.moved_by === "auto") && r.open_path && !r.duplicate_of ? `<span class="transcript-cat suggested" title="${escapeHtml(r.open_path)}">Moved to ${escapeHtml(r.open_path.split(/[\\/]/).slice(-2, -1)[0] ?? "")}</span>` : ""}
         ${r.voc_ingested && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Sent to voc-library-ingest">Sent to VoC</span>' : ""}
         ${r.voc_skip && !r.duplicate_of ? '<span class="transcript-cat suggested" title="Excluded from automatic VoC">Skip Auto VoC</span>' : ""}
         ${r.confidence === "low" ? '<span class="transcript-cat suggested">suggested</span>' : ""}
@@ -463,9 +477,24 @@ const moveError = () =>
 
 // Move / hide / log-it work on a list of transcripts, so the selection bar and the
 // per-row "⋯" menu share one code path.
+const LAST_MOVE_KEY = "lastMoveDest";
+
+async function undoMove(vtts) {
+  try {
+    const r = await invoke("undo_move_transcripts", { vtts });
+    await loadTranscripts();
+    toast(r.moved ? `Moved ${r.moved} back.` : "Nothing to undo.", { error: r.skipped > 0 && !r.moved });
+    if (r.errors.length) toast(r.errors.join("\n"), { error: true });
+  } catch (e) {
+    toast(`Couldn't undo:\n${e}`, { error: true });
+  }
+}
+
 async function moveTranscripts(vtts) {
-  const dest = await openDialog({ directory: true, multiple: false });
+  // Start the picker where the last move went (OneDrive trees are slow to re-browse).
+  const dest = await openDialog({ directory: true, multiple: false, defaultPath: localStorage.getItem(LAST_MOVE_KEY) || undefined });
   if (!dest) return;
+  localStorage.setItem(LAST_MOVE_KEY, dest);
   try {
     const r = await invoke("move_transcripts", { vtts, dest });
     vtts.forEach((v) => selectedTranscripts.delete(v));
@@ -474,7 +503,7 @@ async function moveTranscripts(vtts) {
     // The row stays in the list after a move, so say where it went (and why anything failed).
     const where = dest.split(/[\\/]/).filter(Boolean).pop() || dest;
     const msg = r.moved ? `Moved ${r.moved} to "${where}".` : "Nothing was moved.";
-    toast([msg, r.skipped ? `${r.skipped} skipped or failed.` : "", ...r.errors].filter(Boolean).join("\n"), { error: !r.moved || r.skipped > 0 });
+    toast([msg, r.skipped ? `${r.skipped} skipped or failed.` : "", ...r.errors].filter(Boolean).join("\n"), { error: !r.moved || r.skipped > 0, action: r.moved ? { label: "Undo", run: () => undoMove(r.moved_vtts) } : null });
   } catch (e) {
     messageDialog(`${e}`, { title: "Couldn't move", kind: "error" });
   }
@@ -568,6 +597,7 @@ transcriptsList.addEventListener("click", (e) => {
   const r = transcriptRows.find((x) => x.vtt === vtt);
   if (!r) return;
   const items = [["open", "Open"]];
+  if (r.md_exists && r.open_path) items.push(["reveal", "Show in folder"]);
   if (!r.duplicate_of) {
     items.push(["move", "Move…"], ["logit", "Add to Second Brain"]);
     if (isVoc(r)) items.push(["voc", "Process VoC"]);
@@ -588,6 +618,7 @@ rowMenu.addEventListener("click", (e) => {
   const vtt = rowMenu.dataset.vtt;
   closeRowMenu();
   if (act === "open") openTranscript(vtt);
+  else if (act === "reveal") revealItemInDir(transcriptRows.find((x) => x.vtt === vtt).open_path).catch((e) => toast(`Couldn't show the file:\n${e}`, { error: true }));
   else if (act === "move") moveTranscripts([vtt]);
   else if (act === "logit") addToRaw([vtt]);
   else if (act === "voc") vocTranscripts([vtt]);
@@ -799,6 +830,7 @@ const resetPage = () => {
 };
 transcriptsShowDups.addEventListener("change", resetPage);
 transcriptsShowHidden.addEventListener("change", resetPage);
+transcriptsOnlyMoved.addEventListener("change", resetPage);
 transcriptsSearch.addEventListener("input", resetPage);
 document.querySelector("#transcripts-prev").addEventListener("click", () => {
   transcriptsPage--;

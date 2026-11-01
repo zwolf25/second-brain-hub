@@ -1098,3 +1098,13 @@ label.transcripts-toggle {
 .toast.error {
   background: #a12b2b;
 }
+
+.toast-action {
+  margin-left: 0.6em;
+  padding: 0.15em 0.7em;
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  cursor: pointer;
+}

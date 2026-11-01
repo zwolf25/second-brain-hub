@@ -1,1 +1,1 @@
-The Neural Map now shows wiki families (hub-to-child links are thick, hubs have a ring) and spaces wikis further apart.
+Move now opens at your last folder and has an Undo button. Transcripts has an Only moved filter and a Show in folder menu item.
