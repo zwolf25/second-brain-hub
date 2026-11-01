@@ -33,3 +33,4 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 | F-2 | Settings "Check for updates", visible failures, release notes in the update banner (`RELEASE_NOTES.md`) | 0.9.0 |
 | TD-2 | Deleted orphaned 430 MB `models/` folder on launch | 0.9.0 |
 | TD-3 | Content-Security-Policy set (smoke-tested: Settings page and IPC work; viewer/images not click-tested) | 0.9.0 |
+| F-5 | Hub → child wikis on the Neural Map (thick edges, ringed hubs, closer clusters) in the Hub and the ZacAI Dashboard | 0.9.1 |

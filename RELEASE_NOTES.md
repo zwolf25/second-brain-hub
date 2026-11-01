@@ -1,1 +1,1 @@
-Transcripts actions now show a message that stays until you dismiss it. Settings has Check for updates. Release gated on tests. Removed 430 MB of leftover files. Added a security policy.
+The Neural Map now shows wiki families (hub-to-child links are thick, hubs have a ring) and spaces wikis further apart.

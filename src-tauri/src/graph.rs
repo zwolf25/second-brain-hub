@@ -7,12 +7,16 @@ pub struct GraphNode {
     id: String,
     words: usize,
     path: String,
+    /// Lists child wikis under `## Child wikis`.
+    hub: bool,
 }
 
 #[derive(Serialize, Clone)]
 pub struct GraphEdge {
     source: String,
     target: String,
+    /// "child" when the hub lists the other wiki under `## Child wikis`, else "link".
+    kind: &'static str,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -42,6 +46,27 @@ fn wikilink_targets(text: &str) -> BTreeSet<String> {
     out
 }
 
+/// Wikilinks inside the `## Child wikis` section (up to the next `## ` heading). Only a hub has one;
+/// children point back through `topics:`, which stays an ordinary link.
+fn child_targets(text: &str) -> BTreeSet<String> {
+    let mut section = String::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            inside = line.trim_end().eq_ignore_ascii_case("## Child wikis");
+        } else if inside {
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    wikilink_targets(&section)
+}
+
+/// Order-independent edge key: a hub-child pair is one edge whichever side links first.
+fn pair_key(a: &str, b: &str) -> (String, String) {
+    if a < b { (a.into(), b.into()) } else { (b.into(), a.into()) }
+}
+
 fn word_count(body: &str) -> usize {
     body.split_whitespace().count()
 }
@@ -69,9 +94,21 @@ pub fn build_graph(vault_path: &Path) -> GraphData {
         texts.insert(stem.to_string(), (path.to_string_lossy().into_owned(), text));
     }
 
+    // (hub, child) pairs, restricted to wikis that exist.
+    let mut children: Vec<(&String, String)> = Vec::new();
+    for (id, (_, text)) in &texts {
+        for c in child_targets(text) {
+            if &c != id && texts.contains_key(&c) {
+                children.push((id, c));
+            }
+        }
+    }
+    let hubs: BTreeSet<&String> = children.iter().map(|(h, _)| *h).collect();
+    let child_pairs: BTreeSet<(String, String)> = children.iter().map(|(h, c)| pair_key(h, c)).collect();
+
     let nodes: Vec<GraphNode> = texts
         .iter()
-        .map(|(id, (path, text))| GraphNode { id: id.clone(), words: word_count(text), path: path.clone() })
+        .map(|(id, (path, text))| GraphNode { id: id.clone(), words: word_count(text), path: path.clone(), hub: hubs.contains(id) })
         .collect();
 
     let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
@@ -81,13 +118,10 @@ pub fn build_graph(vault_path: &Path) -> GraphData {
             if &target == name || !texts.contains_key(&target) {
                 continue;
             }
-            let key = if name < &target {
-                (name.clone(), target.clone())
-            } else {
-                (target.clone(), name.clone())
-            };
-            if seen.insert(key) {
-                edges.push(GraphEdge { source: name.clone(), target });
+            let key = pair_key(name, &target);
+            if seen.insert(key.clone()) {
+                let kind = if child_pairs.contains(&key) { "child" } else { "link" };
+                edges.push(GraphEdge { source: name.clone(), target, kind });
             }
         }
     }
@@ -113,5 +147,24 @@ mod tests {
         let g = build_graph(vault.path());
         assert_eq!(g.nodes.len(), 2);
         assert_eq!(g.edges.len(), 1, "a<->b should collapse to one undirected edge, missing/self dropped");
+        assert_eq!(g.edges[0].kind, "link");
+    }
+
+    #[test]
+    fn child_wikis_section_marks_hub_and_child_edges() {
+        let vault = tempfile::tempdir().unwrap();
+        let w = |n: &str, t: &str| std::fs::write(vault.path().join(n), t).unwrap();
+        w("hub.md", "# Hub\n\nSee [[other]].\n\n## Child wikis\n- [[kid]]: a\n- [[gone]]: missing\n\n## Recap\nNot a child: [[notkid]]");
+        w("kid.md", "---\ntopics:\n  - \"[[hub]]\"\n---\n# Kid");
+        w("other.md", "# Other");
+        w("notkid.md", "# Notkid");
+        let g = build_graph(vault.path());
+        let kind = |a: &str, b: &str| g.edges.iter().find(|e| (e.source == a && e.target == b) || (e.source == b && e.target == a)).map(|e| e.kind);
+        assert_eq!(g.edges.len(), 3, "hub-kid once (kid's topics link collapses into it), hub-other, hub-notkid");
+        assert_eq!(kind("hub", "kid"), Some("child"));
+        assert_eq!(kind("hub", "other"), Some("link"));
+        assert_eq!(kind("hub", "notkid"), Some("link"), "after the Child wikis section ends");
+        assert!(g.nodes.iter().find(|n| n.id == "hub").unwrap().hub);
+        assert!(!g.nodes.iter().find(|n| n.id == "kid").unwrap().hub);
     }
 }

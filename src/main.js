@@ -961,15 +961,16 @@ const mapTooltip = document.querySelector("#map-tooltip");
 const mapStatsEl = document.querySelector("#map-stats");
 
 const MAP_ACCENT = "#396cd8";
-const MAP_REPULSION_K = 7500,
+const MAP_REPULSION_K = 12000,
   MAP_SPRING_K = 0.015,
-  MAP_REST_LENGTH = 160,
-  MAP_CENTER_K = 0.006,
+  MAP_REST_LENGTH = 210,
+  MAP_CHILD_REST_LENGTH = 130, // hub-child pairs sit closer so each wiki family clusters
+  MAP_CENTER_K = 0.004,
   MAP_VELOCITY_DECAY = 0.6,
   MAP_ALPHA_DECAY = 0.0175,
   MAP_ALPHA_MIN = 0.001,
   MAP_MAX_SPEED = 40,
-  MAP_COLLIDE_PAD = 14,
+  MAP_COLLIDE_PAD = 20,
   MAP_COLLIDE_K = 0.9,
   MAP_RMIN = 4,
   MAP_RMAX = 18;
@@ -1030,7 +1031,7 @@ function mapTick() {
     const dx = e.t.x - e.s.x,
       dy = e.t.y - e.s.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-    const f = MAP_SPRING_K * (dist - MAP_REST_LENGTH) * s.alpha;
+    const f = MAP_SPRING_K * (dist - (e.child ? MAP_CHILD_REST_LENGTH : MAP_REST_LENGTH)) * s.alpha;
     const fx = (dx / dist) * f,
       fy = (dy / dist) * f;
     e.s.vx += fx;
@@ -1119,11 +1120,11 @@ function mapDraw() {
   const dimming = !!selected;
   const activeSet = selected ? mapState.adjacency.get(selected.id) : null;
 
-  mapCtx.lineWidth = 1 / v.k;
   for (const e of mapState.edges) {
     const involved = selected && (e.s === selected || e.t === selected);
-    mapCtx.strokeStyle = dimming ? (involved ? MAP_ACCENT : border) : border;
-    mapCtx.globalAlpha = dimming && !involved ? 0.15 : involved ? 0.65 : 1;
+    mapCtx.lineWidth = (e.child ? 2.4 : 1) / v.k;
+    mapCtx.strokeStyle = dimming ? (involved ? MAP_ACCENT : border) : e.child ? MAP_ACCENT : border;
+    mapCtx.globalAlpha = dimming && !involved ? 0.15 : involved ? 0.65 : e.child ? 0.55 : 1;
     mapCtx.beginPath();
     mapCtx.moveTo(e.s.x, e.s.y);
     mapCtx.lineTo(e.t.x, e.t.y);
@@ -1138,6 +1139,14 @@ function mapDraw() {
     mapCtx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
     mapCtx.fillStyle = MAP_ACCENT;
     mapCtx.fill();
+    if (n.hub) {
+      // Ring marks a hub wiki (lists children under "## Child wikis").
+      mapCtx.lineWidth = 1.5 / v.k;
+      mapCtx.strokeStyle = MAP_ACCENT;
+      mapCtx.beginPath();
+      mapCtx.arc(n.x, n.y, n.r + 4 / v.k, 0, Math.PI * 2);
+      mapCtx.stroke();
+    }
     if (n === selected || n === hovered) {
       mapCtx.lineWidth = 1.5 / v.k;
       mapCtx.strokeStyle = ink;
@@ -1188,6 +1197,7 @@ function rebuildMapSim(graphData) {
       id: n.id,
       words: n.words,
       path: n.path,
+      hub: !!n.hub,
       r: mapRadiusFor(n.words, wMin, wMax),
       x: Math.cos(angle) * r,
       y: Math.sin(angle) * r,
@@ -1202,7 +1212,7 @@ function rebuildMapSim(graphData) {
   });
   const edges = graphData.edges
     .filter((e) => byId.has(e.source) && byId.has(e.target))
-    .map((e) => ({ s: byId.get(e.source), t: byId.get(e.target) }));
+    .map((e) => ({ s: byId.get(e.source), t: byId.get(e.target), child: e.kind === "child" }));
   edges.forEach((e) => {
     e.s.degree++;
     e.t.degree++;
@@ -1223,7 +1233,8 @@ function rebuildMapSim(graphData) {
   mapResize();
   for (let i = 0; i < 700; i++) mapTick();
   mapFitToView();
-  mapStatsEl.textContent = `${nodes.length} wikis · ${edges.length} links`;
+  const childLinks = edges.filter((e) => e.child).length;
+  mapStatsEl.textContent = `${nodes.length} wikis · ${edges.length} links` + (childLinks ? ` (${childLinks} hub→child, thick; ringed = hub)` : "");
   mapDraw();
 }
 
