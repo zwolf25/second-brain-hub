@@ -1532,6 +1532,7 @@ const appUpdateBtn = document.querySelector("#app-update-btn");
 let pendingUpdate = null;
 
 async function checkForAppUpdate() {
+  if (pendingUpdate) return;
   try {
     pendingUpdate = await checkForUpdate();
   } catch (e) {
@@ -1588,6 +1589,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   checkForAppUpdate();
+  // Long-running sessions (the app sits in the tray) would otherwise only see an update after a restart.
+  setInterval(checkForAppUpdate, 60 * 60 * 1000);
   checkPluginDrift();
 
   listen("index-status", (event) => renderStatus(event.payload));
