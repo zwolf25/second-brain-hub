@@ -139,6 +139,34 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str) -> Result<Vec<Se
     Ok(results)
 }
 
+/// Newest `n` docs by frontmatter `updated` (ISO strings sort lexically; docs
+/// without one sort last). Shown on the empty search page.
+pub fn recent(index: &Index, fields: &Fields, n: usize) -> Result<Vec<SearchResult>> {
+    let searcher = index.reader()?.searcher();
+    let mut all = Vec::new();
+    for (_s, addr) in searcher.search(&tantivy::query::AllQuery, &TopDocs::with_limit(100_000))? {
+        let doc: TantivyDocument = searcher.doc(addr)?;
+        let get = |f| doc.get_first(f).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let body = get(fields.body);
+        let prose = body
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('>'))
+            .unwrap_or("");
+        let snippet = prose
+            .chars()
+            .take(220)
+            .collect::<String>()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        all.push(SearchResult { path: get(fields.path), title: get(fields.title), snippet, updated: get(fields.updated) });
+    }
+    all.sort_by(|a, b| b.updated.cmp(&a.updated));
+    all.truncate(n);
+    Ok(all)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::index;

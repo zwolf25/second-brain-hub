@@ -34,3 +34,7 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 | F-3 | Move picker starts at the last folder; Undo on the Moved toast | 0.10.0 |
 | F-4 | "Only moved" filter and "Show in folder" row action | 0.10.0 |
 | TD-4 | `SMOKE-CHECKLIST.md` (10 manual UI checks; hub-release step 6a). Not automated. | 0.10.0 |
+| — | Re-link moved transcripts shuffled outside the Hub | 0.10.1 |
+| — | "Recently updated" 5 wikis on the empty search page | 0.10.1 |
+| — | Skills banner Refresh button | 0.10.1 |
+| — | Better first-run folder auto-detect (OneDrive roots, vault override, KFM, inbox by email) | 0.10.1 |

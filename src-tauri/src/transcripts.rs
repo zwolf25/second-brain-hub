@@ -822,6 +822,45 @@ pub fn move_selected(out: &Path, vtts: &[String], dest: &Path) -> Result<MoveRep
     move_entries(out, "manual", |n, _| vtts.iter().any(|v| v == n).then(|| dest.to_path_buf()))
 }
 
+/// Finds `name` under `dir`, at most `depth` folders down.
+fn find_file(dir: &Path, name: &std::ffi::OsStr, depth: u8) -> Option<PathBuf> {
+    let direct = dir.join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    if depth == 0 {
+        return None;
+    }
+    std::fs::read_dir(dir).ok()?.flatten().filter(|e| e.path().is_dir()).find_map(|e| find_file(&e.path(), name, depth - 1))
+}
+
+/// A moved file that someone shuffled again outside the Hub (say into a subfolder of its destination) is
+/// found again by name, so Open and Show in folder keep working. Only looks at moved rows whose file is gone,
+/// and only inside the folder they were last known in. Returns how many were re-linked.
+pub fn relocate_missing(out: &Path) -> usize {
+    let mut state = load_state(out);
+    let mut fixed = 0;
+    for e in state.entries.values_mut() {
+        if !matches!(e.moved_by.as_deref(), Some("manual" | "auto")) {
+            continue;
+        }
+        let Some(old) = e.md_path.clone().filter(|p| !Path::new(p).is_file()) else { continue };
+        let old = Path::new(&old);
+        let (Some(dir), Some(name)) = (old.parent().filter(|d| d.is_dir()), old.file_name()) else { continue };
+        if let Some(found) = find_file(dir, name, 3) {
+            e.md_path = Some(found.to_string_lossy().to_string());
+            if let Some(stub) = &e.raw_note {
+                patch_stub_path(stub, &found);
+            }
+            fixed += 1;
+        }
+    }
+    if fixed > 0 {
+        let _ = save_state(out, &state).and_then(|_| write_index(out, &state));
+    }
+    fixed
+}
+
 /// Undo: puts each named transcript's `.md` back in the folder it was moved from. Entries never moved,
 /// or whose old folder is gone, count as skipped (the source is left alone).
 pub fn undo_move(out: &Path, vtts: &[String]) -> Result<MoveReport> {
@@ -1158,21 +1197,25 @@ pub fn rows(out: &Path) -> Vec<Row> {
 /// Scans OneDrive roots (macOS CloudStorage, Windows profile dir) for a folder holding
 /// `*_Transcript.vtt` files. Matches on contents, not folder name (the real one is misspelled).
 pub fn autodetect_folder() -> Option<PathBuf> {
-    let home = crate::config::dirs_home()?;
     let mut best: Option<(usize, PathBuf)> = None;
-    for root in [home.join("Library/CloudStorage"), home] {
-        let Ok(entries) = std::fs::read_dir(&root) else { continue };
-        for od in entries.flatten().filter(|e| e.file_name().to_string_lossy().to_lowercase().contains("onedrive")) {
-            for dir in std::fs::read_dir(od.path()).into_iter().flatten().flatten().filter(|d| d.path().is_dir()) {
-                let n = std::fs::read_dir(dir.path())
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter(|f| f.file_name().to_string_lossy().to_lowercase().ends_with("_transcript.vtt"))
-                    .count();
-                if n > 0 && best.as_ref().is_none_or(|(b, _)| n > *b) {
-                    best = Some((n, dir.path()));
-                }
+    for od in crate::config::onedrive_roots() {
+        // Flow output is a folder in the OneDrive root; also look inside `Documents*` containers.
+        let mut dirs: Vec<PathBuf> = vec![];
+        for d in std::fs::read_dir(&od).into_iter().flatten().flatten().map(|d| d.path()).filter(|d| d.is_dir()) {
+            if d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("Documents")) {
+                dirs.extend(std::fs::read_dir(&d).into_iter().flatten().flatten().map(|x| x.path()).filter(|x| x.is_dir()));
+            }
+            dirs.push(d);
+        }
+        for dir in dirs {
+            let n = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|f| f.file_name().to_string_lossy().to_lowercase().ends_with("_transcript.vtt"))
+                .count();
+            if n > 0 && best.as_ref().is_none_or(|(b, _)| n > *b) {
+                best = Some((n, dir));
             }
         }
     }
@@ -1368,6 +1411,27 @@ mod tests {
         assert!(!e.hidden && !e.logged);
         set_hidden(&out, &v, true).unwrap();
         assert_eq!(load_state(&out).entries[&v[0]].hidden_reason.as_deref(), Some("manual"));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn relocate_finds_a_moved_file_shuffled_into_a_subfolder() {
+        let d = std::env::temp_dir().join(format!("tr-reloc-{}", std::process::id()));
+        let (src, out, dest) = (d.join("src"), d.join("out"), d.join("dest"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let a = "Weekly Release Management-20260101_100000-Meeting Recording.vtt";
+        std::fs::write(src.join(a), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Ann>release a</v>\n").unwrap();
+        scan(&src, &out, &Rules::embedded()).unwrap();
+        move_selected(&out, &[a.to_string()], &dest).unwrap();
+        assert_eq!(relocate_missing(&out), 0, "file still where the Hub put it");
+        let md = PathBuf::from(load_state(&out).entries[a].md_path.clone().unwrap());
+        let sub = dest.join("Meeting Transcripts");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::rename(&md, sub.join(md.file_name().unwrap())).unwrap();
+        assert_eq!(relocate_missing(&out), 1);
+        let now = load_state(&out).entries[a].md_path.clone().unwrap();
+        assert!(Path::new(&now).is_file() && now.contains("Meeting Transcripts"));
         std::fs::remove_dir_all(&d).ok();
     }
 

@@ -238,8 +238,7 @@ async function showSettingsView() {
 function showSearchView() {
   showView("search");
   searchInput.value = "";
-  resultsEl.innerHTML = "";
-  emptyStateEl.textContent = "";
+  runSearch();
   invoke("get_index_status").then(renderStatus);
   refreshRawBadge();
   refreshInboxBadge();
@@ -597,7 +596,7 @@ transcriptsList.addEventListener("click", (e) => {
   const r = transcriptRows.find((x) => x.vtt === vtt);
   if (!r) return;
   const items = [["open", "Open"]];
-  if (r.md_exists && r.open_path) items.push(["reveal", "Show in folder"]);
+  if (r.open_path) items.push(["reveal", "Show in folder"]);
   if (!r.duplicate_of) {
     items.push(["move", "Move…"], ["logit", "Add to Second Brain"]);
     if (isVoc(r)) items.push(["voc", "Process VoC"]);
@@ -618,7 +617,11 @@ rowMenu.addEventListener("click", (e) => {
   const vtt = rowMenu.dataset.vtt;
   closeRowMenu();
   if (act === "open") openTranscript(vtt);
-  else if (act === "reveal") revealItemInDir(transcriptRows.find((x) => x.vtt === vtt).open_path).catch((e) => toast(`Couldn't show the file:\n${e}`, { error: true }));
+  else if (act === "reveal") {
+    const r = transcriptRows.find((x) => x.vtt === vtt);
+    // A missing file still has a last-known folder worth opening.
+    (r.md_exists ? revealItemInDir(r.open_path) : openPath(r.open_path.replace(/[\\/][^\\/]*$/, ""))).catch((e) => toast(`Couldn't show the file:\n${e}`, { error: true }));
+  }
   else if (act === "move") moveTranscripts([vtt]);
   else if (act === "logit") addToRaw([vtt]);
   else if (act === "voc") vocTranscripts([vtt]);
@@ -1496,14 +1499,16 @@ function renderStatus(status) {
 
 async function runSearch() {
   const query = searchInput.value.trim();
-  if (!query) {
-    resultsEl.innerHTML = "";
-    emptyStateEl.textContent = "";
-    return;
-  }
-  const results = await invoke("search_vault", { query });
+  const results = await invoke(query ? "search_vault" : "recent_wikis", query ? { query } : {});
+  if (searchInput.value.trim() !== query) return; // stale: user kept typing
   resultsEl.innerHTML = "";
-  emptyStateEl.textContent = results.length === 0 ? "No matches." : "";
+  emptyStateEl.textContent = query && results.length === 0 ? "No matches." : "";
+  if (!query && results.length) {
+    const h = document.createElement("li");
+    h.className = "results-heading";
+    h.textContent = "Recently updated";
+    resultsEl.appendChild(h);
+  }
   for (const r of results) {
     const li = document.createElement("li");
     li.className = "result";
@@ -1583,6 +1588,11 @@ function renderSkillsBadge(drift) {
 async function checkPluginDrift() {
   renderSkillsBadge(await invoke("get_plugin_drift"));
 }
+
+document.querySelector("#update-banner-refresh-btn").addEventListener("click", async () => {
+  await checkPluginDrift();
+  toast(pluginDrift.length ? `Still ${pluginDrift.length} skill plugin(s) behind.` : "All skill plugins are up to date.");
+});
 
 skillsBadge.addEventListener("click", showSkillsView);
 document.querySelector("#skills-back-btn").addEventListener("click", showSearchView);
@@ -1666,7 +1676,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => checkForAppUpdate(), 60 * 60 * 1000);
   checkPluginDrift();
 
-  listen("index-status", (event) => renderStatus(event.payload));
+  listen("index-status", (event) => {
+    renderStatus(event.payload);
+    if (event.payload.state !== "indexing" && !searchInput.value.trim()) runSearch();
+  });
   listen("raw-count-status", (event) => renderRawCount(event.payload));
   listen("inbox-count-status", (event) => renderInboxCount(event.payload));
   listen("shared-raw-count-status", (event) => renderSharedRawCount(event.payload));

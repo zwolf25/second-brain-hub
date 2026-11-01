@@ -1,1 +1,1 @@
-Move now opens at your last folder and has an Undo button. Transcripts has an Only moved filter and a Show in folder menu item.
+The search page now lists the 5 most recently updated wikis until you start typing. The Skills page update banner has a Refresh button that re-checks and clears the banner if you're already up to date. Moved transcripts you later reorganize in Finder are found again, so Open and Show in folder keep working. First-time setup finds your folders more reliably, including on Windows and when Documents is synced into OneDrive.

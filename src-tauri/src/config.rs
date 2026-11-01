@@ -98,28 +98,36 @@ pub fn is_valid_vault(path: &Path) -> bool {
 /// Paths differ per collaborator (username, OS) — this only covers the common case;
 /// callers fall back to a manual folder picker in the UI when it finds nothing.
 pub fn autodetect_second_brain_root() -> Option<PathBuf> {
-    let home = dirs_home()?;
-
-    let mut candidate_roots = vec![home.join("Library/CloudStorage")]; // macOS
-    candidate_roots.push(home.clone()); // Windows: OneDrive folders sit directly under the user profile
-
-    for root in candidate_roots {
-        let Ok(entries) = std::fs::read_dir(&root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if !name.to_lowercase().contains("onedrive") {
-                continue;
-            }
-            let candidate = entry.path().join("SVC-Product_Management - Second Brain");
-            if candidate.is_dir() {
-                return Some(candidate);
-            }
+    const NAME: &str = "SVC-Product_Management - Second Brain";
+    onedrive_roots().into_iter().find_map(|od| {
+        let direct = od.join(NAME);
+        if direct.is_dir() {
+            return Some(direct);
         }
+        // Windows SharePoint shortcuts can nest under `Documents - <library>`.
+        std::fs::read_dir(&od).ok()?.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("Documents")).find_map(|e| {
+            let nested = e.path().join(NAME);
+            nested.is_dir().then_some(nested)
+        })
+    })
+}
+
+/// Every OneDrive sync root (any tenant name): macOS `~/Library/CloudStorage/OneDrive-*`,
+/// Windows `%USERPROFILE%\OneDrive*`. Sorted so the pick is stable.
+pub(crate) fn onedrive_roots() -> Vec<PathBuf> {
+    let Some(home) = dirs_home() else { return vec![] };
+    let mut roots = vec![];
+    for base in [home.join("Library/CloudStorage"), home] {
+        let Ok(entries) = std::fs::read_dir(&base) else { continue };
+        let mut found: Vec<PathBuf> = entries
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().to_lowercase().contains("onedrive") && e.path().is_dir())
+            .map(|e| e.path())
+            .collect();
+        found.sort();
+        roots.extend(found);
     }
-    None
+    roots
 }
 
 pub fn autodetect_vault() -> Option<PathBuf> {
@@ -142,23 +150,51 @@ pub fn autodetect_vault() -> Option<PathBuf> {
 /// project, but the literal path below resolves the same for everyone who set
 /// up wiki-builder normally).
 pub fn autodetect_raw() -> Option<PathBuf> {
-    let candidate = dirs_home()?
-        .join("Documents/Claude/Projects/Second Brain/Second Brain Obsidian/raw");
-    candidate.is_dir().then_some(candidate)
+    raw_candidates().into_iter().find(|p| p.is_dir())
+}
+
+/// In order: the vault-root override (`SECOND_BRAIN_VAULT_ROOT`, from the environment or
+/// `~/.claude/settings.json` `env` since a Finder-launched app doesn't see `.zshrc`), the
+/// standard `~/Documents` path, then the same path inside each OneDrive root (Known Folder
+/// Move redirects `Documents` there, see ONBOARDING.md Section 1).
+fn raw_candidates() -> Vec<PathBuf> {
+    const TAIL: &str = "Claude/Projects/Second Brain/Second Brain Obsidian/raw";
+    let Some(home) = dirs_home() else { return vec![] };
+    let mut out = vec![];
+    let override_root = std::env::var_os("SECOND_BRAIN_VAULT_ROOT").map(PathBuf::from).or_else(|| {
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join(".claude/settings.json")).ok()?).ok()?;
+        Some(PathBuf::from(v.get("env")?.get("SECOND_BRAIN_VAULT_ROOT")?.as_str()?))
+    });
+    if let Some(root) = override_root {
+        let root = if root.starts_with("~") { home.join(root.strip_prefix("~").unwrap_or(&root).strip_prefix("/").unwrap_or(Path::new(""))) } else { root };
+        out.push(root.join("Second Brain Obsidian/raw"));
+    }
+    out.push(home.join("Documents").join(TAIL));
+    out.extend(onedrive_roots().into_iter().map(|od| od.join("Documents").join(TAIL)));
+    out
 }
 
 /// Needs the local per-machine inbox slug (written by the shared Second Brain's
 /// own onboarding) to know which subfolder is "ours" — returns None if that
 /// hasn't been set up yet, same as the `inbox-review` skill's own fallback.
 pub fn autodetect_inbox() -> Option<PathBuf> {
-    let slug_path = dirs_home()?.join(".claude/second-brain-inbox/inbox-slug");
-    let slug = std::fs::read_to_string(slug_path).ok()?;
-    let slug = slug.trim();
-    if slug.is_empty() {
-        return None;
-    }
-    let candidate = autodetect_second_brain_root()?.join("inbox").join(slug);
-    candidate.is_dir().then_some(candidate)
+    let home = dirs_home()?;
+    let inbox = autodetect_second_brain_root()?.join("inbox");
+    let marked = std::fs::read_to_string(home.join(".claude/second-brain-inbox/inbox-slug")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    marked.map(|slug| inbox.join(slug)).filter(|p| p.is_dir()).or_else(|| inbox_by_email(&home, &inbox))
+}
+
+/// No slug marker (or a stale one): match the Claude account email against the
+/// `email:` line of each `inbox/_roster/<slug>.md` profile.
+fn inbox_by_email(home: &Path, inbox: &Path) -> Option<PathBuf> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).ok()?).ok()?;
+    let email = v.get("oauthAccount")?.get("emailAddress")?.as_str()?.to_lowercase();
+    std::fs::read_dir(inbox.join("_roster")).ok()?.flatten().find_map(|e| {
+        let text = std::fs::read_to_string(e.path()).ok()?;
+        let has = text.lines().any(|l| l.trim().to_lowercase().strip_prefix("email:").is_some_and(|v| v.trim().trim_matches('"') == email));
+        let dir = inbox.join(e.path().file_stem()?);
+        (has && dir.is_dir()).then_some(dir)
+    })
 }
 
 /// Unlike `autodetect_raw` (the *personal* wiki-builder raw folder — a
@@ -177,4 +213,20 @@ pub(crate) fn dirs_home() -> Option<PathBuf> {
     // Windows: USERPROFILE is the real profile; HOME is often set by Git Bash/MSYS to something else.
     let (first, second) = if cfg!(windows) { ("USERPROFILE", "HOME") } else { ("HOME", "USERPROFILE") };
     std::env::var_os(first).or_else(|| std::env::var_os(second)).map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod autodetect_tests {
+    use super::*;
+
+    #[test]
+    fn inbox_matches_roster_email_when_slug_marker_missing() {
+        let t = tempfile::tempdir().unwrap();
+        let inbox = t.path().join("inbox");
+        std::fs::create_dir_all(inbox.join("_roster")).unwrap();
+        std::fs::create_dir_all(inbox.join("jane-doe")).unwrap();
+        std::fs::write(inbox.join("_roster/jane-doe.md"), "---\nname: Jane Doe\nslug: jane-doe\nemail: Jane@x.com\n---\n").unwrap();
+        std::fs::write(t.path().join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"jane@x.com"}}"#).unwrap();
+        assert_eq!(inbox_by_email(t.path(), &inbox), Some(inbox.join("jane-doe")));
+    }
 }

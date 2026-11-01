@@ -112,6 +112,10 @@ mod tests {
         assert_eq!(results[0].title, "Refrigerant Tracking");
         assert!(!results[0].snippet.is_empty());
 
+        let recent = search::recent(&idx, &fields, 1).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].title, "Refrigerant Tracking");
+
         // Fuzzy: a typo should still match via edit-distance term query.
         let typo_results = search::search(&idx, &fields, "refrigirant").unwrap();
         assert!(!typo_results.is_empty(), "expected fuzzy match despite typo");

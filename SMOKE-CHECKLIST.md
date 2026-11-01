@@ -12,3 +12,5 @@ Run on the installed build (or `npx tauri build --debug --no-bundle --config '{"
 8. **Add to Second Brain:** with a raw folder set, a stub appears in `raw/` and the toast says so.
 9. **Row menu:** "Show in folder" opens Finder/Explorer on the transcript; Open shows the viewer.
 10. **Update:** Settings → "Check for updates" says "latest version" (or offers one); the Search-tab banner shows the release notes when an update exists.
+11. **Recently updated:** Search tab with an empty box lists 5 wikis under "Recently updated"; typing replaces them with results, clearing brings them back.
+12. **Skills Refresh:** with the update banner showing, click Refresh: toast says still N behind or up to date; banner clears if up to date.

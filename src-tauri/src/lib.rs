@@ -689,6 +689,10 @@ fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
 
 #[tauri::command]
 fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
+    // try_lock: never make the page wait on a running scan; the next load re-links instead.
+    if let Ok(_guard) = state.transcripts_scan.try_lock() {
+        transcripts::relocate_missing(&state.transcripts_dir);
+    }
     transcripts::rows(&state.transcripts_dir)
 }
 
@@ -731,6 +735,15 @@ fn search_vault(state: State<Arc<AppState>>, query: String) -> Result<Vec<Search
         return Ok(vec![]);
     };
     search::search(idx, fields, &query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn recent_wikis(state: State<Arc<AppState>>) -> Result<Vec<SearchResult>, String> {
+    let guard = state.tantivy.lock().unwrap();
+    let Some((idx, fields)) = guard.as_ref() else {
+        return Ok(vec![]);
+    };
+    search::recent(idx, fields, 5).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -923,6 +936,7 @@ pub fn run() {
             set_vault_path,
             reindex_now,
             search_vault,
+            recent_wikis,
             get_vault_graph,
             log_dir_path,
             get_index_status,
