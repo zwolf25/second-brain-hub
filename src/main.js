@@ -265,7 +265,21 @@ function applyTranscriptsNav(config) {
   document.querySelector("#transcripts-btn").classList.toggle("hidden", !!config.hide_transcripts_page);
 }
 
+// One feedback channel for every action: a toast stays until clicked or ~8 s (the old 4 s
+// status-bar note was easy to miss, so a successful Move looked like nothing happened).
+const toastEl = document.querySelector("#toast");
+let toastTimer = null;
+function toast(text, { error = false } = {}) {
+  toastEl.textContent = text;
+  toastEl.classList.toggle("error", error);
+  toastEl.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), error ? 15000 : 8000);
+}
+toastEl.addEventListener("click", () => toastEl.classList.add("hidden"));
+
 function transcriptsNotice(text) {
+  toast(text);
   transcriptsStatus.textContent = text;
   clearTimeout(transcriptsNoticeTimer);
   transcriptsNoticeTimer = setTimeout(renderTranscripts, 4000);
@@ -419,8 +433,10 @@ async function applyCategory(vtts, category) {
     await invoke("set_transcript_category", { vtts, category });
   } catch (e) {
     messageDialog(`${e}`, { title: "Couldn't change category", kind: "error" });
+    return;
   }
   await loadTranscripts();
+  toast(`Category set to "${category}" for ${vtts.length} transcript${vtts.length === 1 ? "" : "s"}.`);
 }
 
 transcriptsList.addEventListener("change", (e) => {
@@ -455,10 +471,10 @@ async function moveTranscripts(vtts) {
     vtts.forEach((v) => selectedTranscripts.delete(v));
     await loadTranscripts();
     transcriptsNotice(`Moved ${r.moved}${r.skipped ? `, ${r.skipped} failed` : ""}. Duplicates and missing files are skipped.`);
-    // The row stays in the list after a move, so confirm in a dialog the user can't miss.
+    // The row stays in the list after a move, so say where it went (and why anything failed).
     const where = dest.split(/[\\/]/).filter(Boolean).pop() || dest;
-    const detail = [r.moved ? `Moved ${r.moved} to "${where}".\n${dest}` : "Nothing was moved.", r.skipped ? `${r.skipped} skipped or failed.` : "", ...r.errors].filter(Boolean).join("\n\n");
-    messageDialog(detail, { title: r.moved ? "Moved" : "Nothing moved", kind: r.moved ? "info" : "warning" });
+    const msg = r.moved ? `Moved ${r.moved} to "${where}".` : "Nothing was moved.";
+    toast([msg, r.skipped ? `${r.skipped} skipped or failed.` : "", ...r.errors].filter(Boolean).join("\n"), { error: !r.moved || r.skipped > 0 });
   } catch (e) {
     messageDialog(`${e}`, { title: "Couldn't move", kind: "error" });
   }
@@ -466,8 +482,13 @@ async function moveTranscripts(vtts) {
 
 async function hideTranscripts(vtts, hidden) {
   vtts.forEach((v) => selectedTranscripts.delete(v));
-  await invoke("set_transcripts_hidden", { vtts, hidden });
+  try {
+    await invoke("set_transcripts_hidden", { vtts, hidden });
+  } catch (e) {
+    return toast(`Couldn't ${hidden ? "hide" : "unhide"}:\n${e}`, { error: true });
+  }
   await loadTranscripts();
+  toast(`${hidden ? "Hid" : "Unhid"} ${vtts.length} transcript${vtts.length === 1 ? "" : "s"}.${hidden ? ' Use "Show hidden" to see them.' : ""}`);
 }
 
 // Writes a raw-note stub per transcript (no Claude, no tokens) and hides the row; /wiki-builder reads the transcript later.
@@ -1530,18 +1551,26 @@ document.querySelector("#update-banner-btn").addEventListener("click", () => {
 
 const appUpdateBanner = document.querySelector("#app-update-banner");
 const appUpdateBtn = document.querySelector("#app-update-btn");
+const appUpdateText = document.querySelector("#app-update-banner .update-banner-text");
 let pendingUpdate = null;
 
-async function checkForAppUpdate() {
-  if (pendingUpdate) return;
+// `manual` is the Settings button: it reports the outcome; background checks stay quiet.
+async function checkForAppUpdate({ manual = false } = {}) {
+  if (pendingUpdate) return manual && toast(`Version ${pendingUpdate.version} is ready — use "Update & Restart" on the Search tab.`);
   try {
     pendingUpdate = await checkForUpdate();
   } catch (e) {
     console.log("[update] check failed:", e);
+    if (manual) toast(`Couldn't check for updates:\n${e}`, { error: true });
     return;
   }
-  if (pendingUpdate) appUpdateBanner.classList.remove("hidden");
+  if (pendingUpdate) {
+    appUpdateText.textContent = `⬇ Second Brain Hub ${pendingUpdate.version} is available.${pendingUpdate.body ? ` ${pendingUpdate.body}` : ""}`;
+    appUpdateBanner.classList.remove("hidden");
+    if (manual) toast(`Version ${pendingUpdate.version} is available — use "Update & Restart" on the Search tab.`);
+  } else if (manual) toast("You're on the latest version.");
 }
+document.querySelector("#check-update-btn").addEventListener("click", () => checkForAppUpdate({ manual: true }));
 
 appUpdateBtn.addEventListener("click", async () => {
   if (!pendingUpdate || appUpdateBtn.disabled) return;
@@ -1591,7 +1620,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   checkForAppUpdate();
   // Long-running sessions (the app sits in the tray) would otherwise only see an update after a restart.
-  setInterval(checkForAppUpdate, 60 * 60 * 1000);
+  setInterval(() => checkForAppUpdate(), 60 * 60 * 1000);
   checkPluginDrift();
 
   listen("index-status", (event) => renderStatus(event.payload));

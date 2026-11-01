@@ -4,11 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # A docs-only push must not rebuild the already-released version tag.
+    paths-ignore: ["*.md"]
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   # `tauri-action` builds and publishes a signed release (installers +
   # updater's `latest.json` manifest) in one step per platform — it uploads
   # directly to GitHub Release assets via the API, not through
@@ -19,6 +24,7 @@ jobs:
   # release safely (its documented multi-platform pattern), so no manual
   # job-sequencing is needed like the old workflow required.
   release:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +42,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # RELEASE_NOTES.md is rewritten each release (hub-release skill); it becomes the Release body and the updater's `notes`.
+      - name: Read release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            cat RELEASE_NOTES.md
+            echo NOTES_EOF
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,6 +61,6 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "Second Brain Hub v__VERSION__"
-          releaseBody: "See the repo's commit history for what changed in this release."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

@@ -1,9 +1,10 @@
 name: Test
 
-# Smoke test on both platforms without publishing anything (build.yml only releases from main).
+# Smoke test on both platforms without publishing anything (build.yml only releases from main, and calls this workflow first so a failing test blocks the release).
 on:
   workflow_dispatch:
   pull_request:
+  workflow_call:
 
 jobs:
   test:

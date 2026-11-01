@@ -1079,3 +1079,22 @@ label.transcripts-toggle {
   gap: 1em;
   padding: 0.5em 0;
 }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.4em;
+  transform: translateX(-50%);
+  max-width: min(36em, 90vw);
+  padding: 0.7em 1.1em;
+  background: #2b2b2b;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  z-index: 1000;
+  white-space: pre-line;
+}
+.toast.error {
+  background: #a12b2b;
+}

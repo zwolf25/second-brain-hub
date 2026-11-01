@@ -849,6 +849,8 @@ pub fn run() {
 
             let config = config::load(&config_dir);
             let index_dir = data_dir.join("index");
+            // The AI chat (v2) was removed in v3 but left ~430 MB of downloaded models behind; nothing reads this folder.
+            let _ = std::fs::remove_dir_all(data_dir.join("models"));
 
             let state = Arc::new(AppState {
                 index_dir,
