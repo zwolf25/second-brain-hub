@@ -238,7 +238,7 @@ async function showSettingsView() {
 function showSearchView() {
   showView("search");
   searchInput.value = "";
-  runSearch();
+  loadFamilies().then(runSearch);
   invoke("get_index_status").then(renderStatus);
   refreshRawBadge();
   refreshInboxBadge();
@@ -890,8 +890,13 @@ function resolveImageSrc(src, sourceDir) {
   return "/" + parts.join("/");
 }
 
-async function openInViewer(path, returnTo = "search") {
+// Wikilink navigation: the pages visited before the current one, so Back walks them in reverse.
+let viewerHistory = [];
+
+// opts.keepHistory: re-render or step within the same reading session (link click, Back, Save).
+async function openInViewer(path, returnTo = "search", opts = {}) {
   viewerReturnTo = returnTo;
+  if (!opts.keepHistory) viewerHistory = [];
   let doc;
   try {
     doc = await invoke("render_markdown", { path });
@@ -918,8 +923,40 @@ async function openInViewer(path, returnTo = "search") {
 
   exitEdit();
   viewerEditBtn.classList.toggle("hidden", !(await invoke("can_edit_markdown", { path: doc.source_path })));
+  await renderBacklinks(doc.source_path);
   showViewer();
+  viewerContentEl.scrollTop = 0;
 }
+
+async function renderBacklinks(path) {
+  const links = await invoke("get_backlinks", { path });
+  if (!links.length) return;
+  const nav = document.createElement("nav");
+  nav.className = "backlinks";
+  nav.innerHTML = `<h3>Linked from (${links.length})</h3>`;
+  for (const l of links) {
+    const a = document.createElement("a");
+    a.textContent = l.title;
+    a.addEventListener("click", () => followLink(l.path));
+    nav.appendChild(a);
+  }
+  viewerContentEl.appendChild(nav);
+}
+
+function followLink(path) {
+  if (currentViewerPath) viewerHistory.push(currentViewerPath);
+  openInViewer(path, viewerReturnTo, { keepHistory: true });
+}
+
+viewerContentEl.addEventListener("click", async (e) => {
+  const a = e.target.closest("a.wikilink");
+  if (!a) return;
+  e.preventDefault();
+  const target = a.dataset.target;
+  const path = await invoke("resolve_wikilink", { target });
+  if (path) followLink(path);
+  else toast(`No wiki named "${target}" in the vault.`, { error: true });
+});
 
 function showViewer() {
   showView("viewer");
@@ -976,7 +1013,7 @@ async function saveEdit() {
     messageDialog(`${e}`, { title: "Couldn't save", kind: "error" });
     return;
   }
-  await openInViewer(currentViewerPath, viewerReturnTo); // re-render; also leaves edit mode
+  await openInViewer(currentViewerPath, viewerReturnTo, { keepHistory: true }); // re-render; also leaves edit mode
 }
 
 // Resolves false if the user chose to keep editing. Native dialog: the webview's
@@ -1497,23 +1534,51 @@ function renderStatus(status) {
   }
 }
 
+// Wikis updated since the previous launch get a "New" badge; the stamp advances on every launch,
+// so what counts as new is fixed for the whole session. First launch has no baseline, so nothing is new.
+const sinceSeen = localStorage.getItem("lastSeenAt");
+localStorage.setItem("lastSeenAt", new Date().toISOString());
+const familySelect = document.querySelector("#family-filter");
+
+async function loadFamilies() {
+  const families = await invoke("get_families");
+  const current = familySelect.value;
+  familySelect.innerHTML = '<option value="">All wikis</option>';
+  for (const f of families) {
+    const opt = document.createElement("option");
+    opt.value = f.hub;
+    opt.textContent = `${f.hub} (+${f.children})`;
+    familySelect.appendChild(opt);
+  }
+  familySelect.value = families.some((f) => f.hub === current) ? current : "";
+  familySelect.classList.toggle("hidden", families.length === 0);
+}
+
 async function runSearch() {
   const query = searchInput.value.trim();
-  const results = await invoke(query ? "search_vault" : "recent_wikis", query ? { query } : {});
+  const family = familySelect.value || null;
+  let results;
+  let newCount = 0;
+  if (query) {
+    results = await invoke("search_vault", { query, family });
+  } else {
+    ({ items: results, new_count: newCount } = await invoke("recent_wikis", { since: sinceSeen, family }));
+  }
   if (searchInput.value.trim() !== query) return; // stale: user kept typing
   resultsEl.innerHTML = "";
   emptyStateEl.textContent = query && results.length === 0 ? "No matches." : "";
   if (!query && results.length) {
     const h = document.createElement("li");
     h.className = "results-heading";
-    h.textContent = "Recently updated";
+    h.textContent = newCount ? `Recently updated · ${newCount} changed since your last visit` : "Recently updated";
     resultsEl.appendChild(h);
   }
   for (const r of results) {
     const li = document.createElement("li");
     li.className = "result";
+    const isNew = !query && sinceSeen && r.updated && r.updated > sinceSeen;
     li.innerHTML = `
-      <div class="result-title">${escapeHtml(r.title)}</div>
+      <div class="result-title">${escapeHtml(r.title)}${isNew ? '<span class="badge-new">New</span>' : ""}</div>
       <div class="result-snippet">${r.snippet || ""}</div>
       <div class="result-meta">${escapeHtml(r.updated || "")}</div>
     `;
@@ -1678,7 +1743,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   listen("index-status", (event) => {
     renderStatus(event.payload);
-    if (event.payload.state !== "indexing" && !searchInput.value.trim()) runSearch();
+    if (event.payload.state !== "indexing") loadFamilies().then(() => !searchInput.value.trim() && runSearch());
   });
   listen("raw-count-status", (event) => renderRawCount(event.payload));
   listen("inbox-count-status", (event) => renderInboxCount(event.payload));
@@ -1726,6 +1791,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     revealItemInDir(dir);
   });
 
+  familySelect.addEventListener("change", runSearch);
   searchInput.addEventListener("input", () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(runSearch, 200);
@@ -1743,6 +1809,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.querySelector("#viewer-back-btn").addEventListener("click", async () => {
     if (!(await confirmLeaveEdit())) return;
     exitEdit();
+    if (viewerHistory.length) return openInViewer(viewerHistory.pop(), viewerReturnTo, { keepHistory: true });
     if (viewerReturnTo === "map") showMapView();
     else if (viewerReturnTo === "transcripts") {
       // List DOM is untouched while the viewer is up, so selection/filters survive; only scroll resets.

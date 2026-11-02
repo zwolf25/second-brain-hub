@@ -10,13 +10,11 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 
 | # | ID | Type | Item | V | E | Score | Why / evidence |
 |---|----|------|------|---|---|-------|----------------|
-| 1 | TD-5 | Debt | **Intel Mac build.** `macos-latest` is arm64, so the `.dmg` and updater only serve Apple Silicon. Add an `x86_64-apple-darwin` matrix entry if any teammate is on Intel. First ask who is. | 3 | 3 | 9 | ARCHITECTURE §9 caveat; unknown how many users affected. |
-| 2 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5). Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. |
-| 3 | TD-7 | Debt | **Split the big files.** `main.js` is 1,673 lines (one scope, all pages) and `transcripts.rs` is 1,642. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. |
-| 4 | TD-8 | Debt | **Trim ARCHITECTURE.md** (70 KB; sections numbered 15, 14, 13, then 1-12; some §12 items now stale, e.g. updater "verified on Mac" while 3.x/4.x cycles have run). Move version history to a CHANGELOG and keep the doc current-state. | 2 | 3 | 6 | Slows every release (hub-release step 3 edits this file). |
-| 5 | TD-9 | Debt | **Incremental indexing.** Index re-walks the whole vault on any change (§3, §12 item 4). Only worth doing when it measurably slows. | 2 | 4 | 4 | No measurement yet; add timing to the log first. |
+| 1 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5). Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. |
+| 2 | TD-7 | Debt | **Split the big files.** `main.js` is 1,673 lines (one scope, all pages) and `transcripts.rs` is 1,642. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. |
 
 ## Not doing (decided)
+- Incremental indexing (TD-9): a full rebuild of the real vault takes 594 ms (2026-11-01). Revisit if the `indexed N docs ... in M ms` log line shows seconds.
 - Apple notarization / paid developer account — internal tool, cost not justified (ARCHITECTURE §9).
 
 ## Done
@@ -38,3 +36,7 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 | — | "Recently updated" 5 wikis on the empty search page | 0.10.1 |
 | — | Skills banner Refresh button | 0.10.1 |
 | — | Better first-run folder auto-detect (OneDrive roots, vault override, KFM, inbox by email) | 0.10.1 |
+| TD-5 | Intel Mac build added to `build.yml` (matrix `--target x86_64-apple-darwin`); unverified until the next release builds | 0.11.0 |
+| TD-8 | ARCHITECTURE.md trimmed 76 KB to 58 KB: sections in order, release-by-release detail and the v2 AI Search archive moved to `CHANGELOG.md`, stale risks fixed; hub-release step 3 now writes CHANGELOG.md | 0.11.0 |
+| TD-9 | Index timing logged on every reindex; measured 594 ms for 218 real docs, so incremental indexing is not built (see Not doing) | 0.11.0 |
+| — | Clickable wikilinks + child wikis, backlinks, wiki-family search filter, "new since last visit" markers | 0.11.0 |

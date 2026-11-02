@@ -28,12 +28,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, windows-latest]
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          # Intel Macs: no known user yet, built so the first one can still install and auto-update.
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          - platform: windows-latest
+            target: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: actions/setup-node@v4
         with:
@@ -62,5 +71,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Second Brain Hub v__VERSION__"
           releaseBody: ${{ steps.notes.outputs.body }}
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
           releaseDraft: false
           prerelease: false

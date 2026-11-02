@@ -151,7 +151,10 @@
             <button id="app-update-btn" class="topbar-btn">Update &amp; Restart</button>
           </div>
           <div class="search-row">
-            <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
+            <div class="search-inputs">
+              <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
+              <select id="family-filter" class="hidden" title="Limit to one wiki family (a hub and its child wikis)"></select>
+            </div>
             <p class="hint muted">Double-click a result to open the file.</p>
           </div>
           <ul id="results" class="results"></ul>

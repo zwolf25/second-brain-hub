@@ -14,3 +14,8 @@ Run on the installed build (or `npx tauri build --debug --no-bundle --config '{"
 10. **Update:** Settings → "Check for updates" says "latest version" (or offers one); the Search-tab banner shows the release notes when an update exists.
 11. **Recently updated:** Search tab with an empty box lists 5 wikis under "Recently updated"; typing replaces them with results, clearing brings them back.
 12. **Skills Refresh:** with the update banner showing, click Refresh: toast says still N behind or up to date; banner clears if up to date.
+13. **Wikilinks:** open a wiki; a `[[link]]` is clickable and opens that page; Back returns to the previous page, then to the search list. A link to a missing wiki shows a toast. Links inside code blocks stay plain text.
+14. **Hub children:** open a hub wiki (it has a Child wikis list); each child opens when clicked.
+15. **Backlinks:** a linked-to page ends with "Linked from (N)"; clicking a chip opens that page.
+16. **Family filter:** the dropdown next to the search box lists hubs; choosing one limits both the empty-box list and search results to that hub and its children; "All wikis" restores everything.
+17. **New markers:** relaunch after a wiki changed; the "Recently updated" heading says how many changed and those rows show a green New badge.

@@ -107,18 +107,37 @@ mod tests {
 
         let (idx, fields) = open(index_dir.path()).unwrap();
 
-        let results = search::search(&idx, &fields, "refrigerant").unwrap();
+        let results = search::search(&idx, &fields, "refrigerant", None).unwrap();
         assert!(!results.is_empty(), "expected at least one match for 'refrigerant'");
         assert_eq!(results[0].title, "Refrigerant Tracking");
         assert!(!results[0].snippet.is_empty());
 
-        let recent = search::recent(&idx, &fields, 1).unwrap();
-        assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].title, "Refrigerant Tracking");
+        let recent = search::recent(&idx, &fields, 1, Some("2026-06-15"), None).unwrap();
+        assert_eq!(recent.items.len(), 1);
+        assert_eq!(recent.items[0].title, "Refrigerant Tracking");
+        assert_eq!(recent.new_count, 1, "only refrigerant-tracking is newer than 2026-06-15");
+
+        let family: std::collections::HashSet<String> = ["unrelated".to_string()].into();
+        let only = search::search(&idx, &fields, "refrigerant", Some(&family)).unwrap();
+        assert!(only.is_empty(), "family filter must exclude pages outside the family");
+        let rec = search::recent(&idx, &fields, 5, None, Some(&family)).unwrap();
+        assert_eq!(rec.items.len(), 1);
+        assert_eq!(rec.items[0].title, "Unrelated Topic");
 
         // Fuzzy: a typo should still match via edit-distance term query.
-        let typo_results = search::search(&idx, &fields, "refrigirant").unwrap();
+        let typo_results = search::search(&idx, &fields, "refrigirant", None).unwrap();
         assert!(!typo_results.is_empty(), "expected fuzzy match despite typo");
         assert_eq!(typo_results[0].title, "Refrigerant Tracking");
+    }
+
+    /// Timing probe for backlog TD-9: `cargo test real_vault_rebuild_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_vault_rebuild_time() {
+        let vault = crate::config::autodetect_vault().expect("no shared vault on this machine");
+        let dir = tempfile::tempdir().unwrap();
+        let t = std::time::Instant::now();
+        let n = rebuild(dir.path(), &vault).unwrap();
+        println!("rebuilt {n} docs in {} ms", t.elapsed().as_millis());
     }
 }

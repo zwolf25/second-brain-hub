@@ -1,6 +1,7 @@
 use crate::index::Fields;
 use anyhow::Result;
 use serde::Serialize;
+use std::collections::HashSet;
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, PhraseQuery, Query, TermQuery};
 use tantivy::schema::document::TantivyDocument;
@@ -33,7 +34,14 @@ fn is_stopword(token: &str) -> bool {
     STOPWORDS.contains(&token)
 }
 
-pub fn search(index: &Index, fields: &Fields, query_text: &str) -> Result<Vec<SearchResult>> {
+/// File stem of an indexed path — the wiki's id in `graph.rs` and family sets.
+fn stem(path: &str) -> &str {
+    std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("")
+}
+
+/// `allowed` (a wiki family's stems) restricts results; it is applied after ranking,
+/// so more candidates are fetched to still fill the page.
+pub fn search(index: &Index, fields: &Fields, query_text: &str, allowed: Option<&HashSet<String>>) -> Result<Vec<SearchResult>> {
     let query_text = query_text.trim();
     if query_text.is_empty() {
         return Ok(vec![]);
@@ -109,7 +117,8 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str) -> Result<Vec<Se
     }
 
     let query = BooleanQuery::new(clauses);
-    let top_docs = searcher.search(&query, &TopDocs::with_limit(MAX_RESULTS))?;
+    let fetch = if allowed.is_some() { 1000 } else { MAX_RESULTS };
+    let top_docs = searcher.search(&query, &TopDocs::with_limit(fetch))?;
 
     let snippet_generator = SnippetGenerator::create(&searcher, &query, fields.body).ok();
 
@@ -118,6 +127,9 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str) -> Result<Vec<Se
         let doc: TantivyDocument = searcher.doc(doc_address)?;
 
         let get = |f| doc.get_first(f).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if allowed.is_some_and(|a| !a.contains(stem(&get(fields.path)))) {
+            continue;
+        }
 
         let snippet = snippet_generator
             .as_ref()
@@ -134,19 +146,33 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str) -> Result<Vec<Se
             snippet,
             updated: get(fields.updated),
         });
+        if results.len() == MAX_RESULTS {
+            break;
+        }
     }
 
     Ok(results)
 }
 
+#[derive(Serialize)]
+pub struct RecentWikis {
+    pub items: Vec<SearchResult>,
+    /// Docs with `updated` later than `since` (all of them, not just the page shown).
+    pub new_count: usize,
+}
+
 /// Newest `n` docs by frontmatter `updated` (ISO strings sort lexically; docs
 /// without one sort last). Shown on the empty search page.
-pub fn recent(index: &Index, fields: &Fields, n: usize) -> Result<Vec<SearchResult>> {
+pub fn recent(index: &Index, fields: &Fields, n: usize, since: Option<&str>, allowed: Option<&HashSet<String>>) -> Result<RecentWikis> {
     let searcher = index.reader()?.searcher();
     let mut all = Vec::new();
     for (_s, addr) in searcher.search(&tantivy::query::AllQuery, &TopDocs::with_limit(100_000))? {
         let doc: TantivyDocument = searcher.doc(addr)?;
         let get = |f| doc.get_first(f).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let path = get(fields.path);
+        if allowed.is_some_and(|a| !a.contains(stem(&path))) {
+            continue;
+        }
         let body = get(fields.body);
         let prose = body
             .lines()
@@ -160,11 +186,12 @@ pub fn recent(index: &Index, fields: &Fields, n: usize) -> Result<Vec<SearchResu
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
-        all.push(SearchResult { path: get(fields.path), title: get(fields.title), snippet, updated: get(fields.updated) });
+        all.push(SearchResult { path, title: get(fields.title), snippet, updated: get(fields.updated) });
     }
     all.sort_by(|a, b| b.updated.cmp(&a.updated));
+    let new_count = since.map_or(0, |s| all.iter().filter(|r| !r.updated.is_empty() && r.updated.as_str() > s).count());
     all.truncate(n);
-    Ok(all)
+    Ok(RecentWikis { items: all, new_count })
 }
 
 #[cfg(test)]
@@ -190,7 +217,7 @@ mod tests {
         index::rebuild(index_dir.path(), vault.path()).unwrap();
         let (idx, fields) = index::open(index_dir.path()).unwrap();
 
-        let results = super::search(&idx, &fields, "refrigerant").unwrap();
+        let results = super::search(&idx, &fields, "refrigerant", None).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].title, "Exact", "exact term match should outrank a fuzzy typo match");
     }
@@ -214,7 +241,7 @@ mod tests {
         index::rebuild(index_dir.path(), vault.path()).unwrap();
         let (idx, fields) = index::open(index_dir.path()).unwrap();
 
-        let results = super::search(&idx, &fields, "how do I enable rate validation").unwrap();
+        let results = super::search(&idx, &fields, "how do I enable rate validation", None).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].title, "Rate Validation");
     }

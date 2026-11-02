@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 #[derive(Serialize, Clone)]
@@ -71,15 +71,11 @@ fn word_count(body: &str) -> usize {
     body.split_whitespace().count()
 }
 
-/// Cross-linked wiki graph for the Vault Neural Map view. Reads `vault_path`'s
-/// top-level .md files directly (same flat layout the file watcher and
-/// `index::rebuild` already assume) rather than reusing the tantivy pipeline,
-/// since `frontmatter::parse` strips `[[`/`]]` brackets for search snippets —
-/// this needs the link targets those brackets carry.
-pub fn build_graph(vault_path: &Path) -> GraphData {
-    let mut texts: HashMap<String, (String, String)> = HashMap::new(); // id -> (path, text)
+/// id (file stem) -> (path, text) for the vault's top-level wikis (flat layout, like the indexer).
+fn read_texts(vault_path: &Path) -> HashMap<String, (String, String)> {
+    let mut texts = HashMap::new();
     let Ok(entries) = std::fs::read_dir(vault_path) else {
-        return GraphData::default();
+        return texts;
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -92,6 +88,71 @@ pub fn build_graph(vault_path: &Path) -> GraphData {
         }
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
         texts.insert(stem.to_string(), (path.to_string_lossy().into_owned(), text));
+    }
+    texts
+}
+
+/// Hub id -> its existing child ids (from `## Child wikis`). A "family" is the hub plus these.
+pub fn families(vault_path: &Path) -> BTreeMap<String, Vec<String>> {
+    let texts = read_texts(vault_path);
+    let mut out = BTreeMap::new();
+    for (id, (_, text)) in &texts {
+        let kids: Vec<String> = child_targets(text).into_iter().filter(|c| c != id && texts.contains_key(c)).collect();
+        if !kids.is_empty() {
+            out.insert(id.clone(), kids);
+        }
+    }
+    out
+}
+
+#[derive(Serialize)]
+pub struct Backlink {
+    pub title: String,
+    pub path: String,
+}
+
+/// Wikis whose text links to `stem` (case-insensitive, like Obsidian), by title.
+pub fn backlinks(vault_path: &Path, stem: &str) -> Vec<Backlink> {
+    let mut out: Vec<Backlink> = read_texts(vault_path)
+        .into_iter()
+        .filter(|(id, (_, text))| !id.eq_ignore_ascii_case(stem) && wikilink_targets(text).iter().any(|t| t.eq_ignore_ascii_case(stem)))
+        .map(|(id, (path, text))| Backlink { title: crate::frontmatter::parse(&text, &id).title, path })
+        .collect();
+    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out
+}
+
+/// Path of the wiki a `[[target]]` points at (exact stem first, then case-insensitive).
+pub fn resolve(vault_path: &Path, target: &str) -> Option<String> {
+    let mut fallback = None;
+    for entry in std::fs::read_dir(vault_path).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if stem.starts_with("~$") {
+            continue;
+        }
+        if stem == target {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        if stem.eq_ignore_ascii_case(target) {
+            fallback = Some(path.to_string_lossy().into_owned());
+        }
+    }
+    fallback
+}
+
+/// Cross-linked wiki graph for the Vault Neural Map view. Reads `vault_path`'s
+/// top-level .md files directly (same flat layout the file watcher and
+/// `index::rebuild` already assume) rather than reusing the tantivy pipeline,
+/// since `frontmatter::parse` strips `[[`/`]]` brackets for search snippets —
+/// this needs the link targets those brackets carry.
+pub fn build_graph(vault_path: &Path) -> GraphData {
+    let texts = read_texts(vault_path);
+    if texts.is_empty() {
+        return GraphData::default();
     }
 
     // (hub, child) pairs, restricted to wikis that exist.
@@ -166,5 +227,21 @@ mod tests {
         assert_eq!(kind("hub", "notkid"), Some("link"), "after the Child wikis section ends");
         assert!(g.nodes.iter().find(|n| n.id == "hub").unwrap().hub);
         assert!(!g.nodes.iter().find(|n| n.id == "kid").unwrap().hub);
+    }
+
+    #[test]
+    fn families_backlinks_and_resolve() {
+        let vault = tempfile::tempdir().unwrap();
+        let w = |n: &str, t: &str| std::fs::write(vault.path().join(n), t).unwrap();
+        w("hub.md", "# Hub\n\n## Child wikis\n- [[kid]]\n- [[gone]]");
+        w("kid.md", "---\ntopics:\n  - \"[[hub]]\"\n---\n# Kid Title");
+        w("solo.md", "# Solo\n\nSee [[Kid]].");
+        let f = families(vault.path());
+        assert_eq!(f.len(), 1);
+        assert_eq!(f["hub"], vec!["kid".to_string()]);
+        let b: Vec<String> = backlinks(vault.path(), "kid").into_iter().map(|b| b.title).collect();
+        assert_eq!(b, vec!["Hub".to_string(), "Solo".to_string()]);
+        assert!(resolve(vault.path(), "KID").unwrap().ends_with("kid.md"));
+        assert!(resolve(vault.path(), "nope").is_none());
     }
 }

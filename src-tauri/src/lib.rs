@@ -144,12 +144,13 @@ fn reindex(app: &AppHandle) {
     };
 
     set_status(IndexStatus::Indexing);
+    let started = std::time::Instant::now();
 
     match index::rebuild(&state.index_dir, &vault_path) {
         Ok(count) => match index::open(&state.index_dir) {
             Ok((idx, fields)) => {
                 *state.tantivy.lock().unwrap() = Some((idx, fields));
-                tracing::info!("indexed {count} docs from {}", vault_path.display());
+                tracing::info!("indexed {count} docs from {} in {} ms", vault_path.display(), started.elapsed().as_millis());
                 set_status(IndexStatus::Idle { count });
                 // Push a fresh link graph on every reindex (launch, manual, or
                 // file-watcher-triggered) — the Vault Neural Map view live-updates
@@ -728,22 +729,62 @@ fn get_skills(state: State<Arc<AppState>>) -> Vec<skills::SkillInfo> {
     skills::list_skills(root)
 }
 
-#[tauri::command]
-fn search_vault(state: State<Arc<AppState>>, query: String) -> Result<Vec<SearchResult>, String> {
-    let guard = state.tantivy.lock().unwrap();
-    let Some((idx, fields)) = guard.as_ref() else {
-        return Ok(vec![]);
-    };
-    search::search(idx, fields, &query).map_err(|e| e.to_string())
+/// Stems of a wiki family (the hub plus its children), or None for "all wikis".
+fn family_filter(state: &AppState, family: Option<String>) -> Option<std::collections::HashSet<String>> {
+    let hub = family.filter(|f| !f.is_empty())?;
+    let vault = state.config.lock().unwrap().vault_path.clone()?;
+    let mut set: std::collections::HashSet<String> = graph::families(&vault).remove(&hub).unwrap_or_default().into_iter().collect();
+    set.insert(hub);
+    Some(set)
 }
 
 #[tauri::command]
-fn recent_wikis(state: State<Arc<AppState>>) -> Result<Vec<SearchResult>, String> {
+fn search_vault(state: State<Arc<AppState>>, query: String, family: Option<String>) -> Result<Vec<SearchResult>, String> {
+    let allowed = family_filter(&state, family);
     let guard = state.tantivy.lock().unwrap();
     let Some((idx, fields)) = guard.as_ref() else {
         return Ok(vec![]);
     };
-    search::recent(idx, fields, 5).map_err(|e| e.to_string())
+    search::search(idx, fields, &query, allowed.as_ref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn recent_wikis(state: State<Arc<AppState>>, since: Option<String>, family: Option<String>) -> Result<search::RecentWikis, String> {
+    let allowed = family_filter(&state, family);
+    let guard = state.tantivy.lock().unwrap();
+    let Some((idx, fields)) = guard.as_ref() else {
+        return Ok(search::RecentWikis { items: vec![], new_count: 0 });
+    };
+    search::recent(idx, fields, 5, since.as_deref(), allowed.as_ref()).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct Family {
+    hub: String,
+    children: usize,
+}
+
+#[tauri::command]
+fn get_families(state: State<Arc<AppState>>) -> Vec<Family> {
+    let vault = state.config.lock().unwrap().vault_path.clone();
+    vault.map(|v| graph::families(&v).into_iter().map(|(hub, kids)| Family { hub, children: kids.len() }).collect()).unwrap_or_default()
+}
+
+#[tauri::command]
+fn resolve_wikilink(state: State<Arc<AppState>>, target: String) -> Option<String> {
+    let vault = state.config.lock().unwrap().vault_path.clone()?;
+    graph::resolve(&vault, &target)
+}
+
+/// Only for files inside the vault, so a same-named file elsewhere never shows vault backlinks.
+#[tauri::command]
+fn get_backlinks(state: State<Arc<AppState>>, path: String) -> Vec<graph::Backlink> {
+    let Some(vault) = state.config.lock().unwrap().vault_path.clone() else { return vec![] };
+    let p = std::path::Path::new(&path);
+    match p.file_stem().and_then(|s| s.to_str()) {
+        Some(stem) if p.starts_with(&vault) => graph::backlinks(&vault, stem),
+        _ => vec![],
+    }
 }
 
 #[tauri::command]
@@ -937,6 +978,9 @@ pub fn run() {
             reindex_now,
             search_vault,
             recent_wikis,
+            get_families,
+            resolve_wikilink,
+            get_backlinks,
             get_vault_graph,
             log_dir_path,
             get_index_status,

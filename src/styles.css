@@ -63,9 +63,57 @@ body {
   padding: 0.75em 1em 0;
 }
 
-.search-row > input {
-  width: 100%;
+.search-inputs {
+  display: flex;
+  gap: 0.5em;
+}
+
+.search-inputs > input {
+  flex: 1;
   padding: 0.5em 0.8em;
+}
+
+.search-inputs > select {
+  max-width: 14em;
+}
+
+.badge-new {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 0.5em;
+  border-radius: 999px;
+  background: #2f7d4f;
+  color: #fff;
+  font-size: 0.7em;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.viewer-content a.wikilink {
+  cursor: pointer;
+}
+
+.backlinks {
+  margin-top: 3em;
+  padding-top: 1em;
+  border-top: 1px solid #ddd;
+}
+
+.backlinks h3 {
+  margin: 0 0 0.5em;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+}
+
+.backlinks a {
+  display: inline-block;
+  margin: 0 0.5em 0.4em 0;
+  padding: 0.2em 0.7em;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  cursor: pointer;
 }
 
 .hint {

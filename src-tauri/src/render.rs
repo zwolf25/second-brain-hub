@@ -12,10 +12,9 @@ pub struct RenderedDoc {
     pub source_path: String,
 }
 
-/// Reads a `.md`/`.markdown` file, strips frontmatter and wikilink brackets
-/// (reusing `frontmatter::parse`, same as the search indexer), and renders
-/// the body to HTML. No wikilink navigation, no syntax highlighting — MVP
-/// viewer scope, matches the search snippet's plain-text bracket stripping.
+/// Reads a `.md`/`.markdown` file, strips frontmatter and renders the body to HTML.
+/// `[[wikilinks]]` become `<a class="wikilink" data-target=…>` (the page resolves and
+/// opens them); code blocks and inline code keep their brackets. No syntax highlighting.
 pub fn render_file(path: &Path) -> Result<RenderedDoc> {
     let is_markdown = path
         .extension()
@@ -36,11 +35,68 @@ pub fn render_file(path: &Path) -> Result<RenderedDoc> {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let parser = Parser::new_ext(&parsed.body, options);
+    let (_, body) = frontmatter::split_frontmatter(&raw);
+    let linked = link_wikilinks(body);
+    let parser = Parser::new_ext(&linked, options);
     let mut html_out = String::new();
     html::push_html(&mut html_out, parser);
 
     Ok(RenderedDoc { html: html_out, title: parsed.title, source_path: path.to_string_lossy().to_string() })
+}
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// `[[target|alias]]` / `[[target#Heading]]` -> anchor; `[[#Heading]]` -> plain text.
+fn link_line(seg: &str) -> String {
+    let mut out = String::new();
+    let mut rest = seg;
+    while let Some(start) = rest.find("[[") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else { break };
+        let inner = &after[..end];
+        let (target_part, alias) = match inner.split_once('|') {
+            Some((t, a)) => (t, Some(a)),
+            None => (inner, None),
+        };
+        let target = target_part.split('#').next().unwrap_or("").trim();
+        let label = esc(alias.unwrap_or(if target.is_empty() { inner.trim_start_matches('#') } else { inner }).trim());
+        out.push_str(&rest[..start]);
+        if target.is_empty() {
+            out.push_str(&label);
+        } else {
+            out.push_str(&format!("<a class=\"wikilink\" data-target=\"{}\" href=\"#\">{label}</a>", esc(target)));
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Turns wikilinks into anchors, skipping fenced code blocks and inline code spans.
+pub fn link_wikilinks(body: &str) -> String {
+    let mut fenced = false;
+    let mut lines = Vec::new();
+    for line in body.split('\n') {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fenced = !fenced;
+            lines.push(line.to_string());
+        } else if fenced {
+            lines.push(line.to_string());
+        } else {
+            let mut out = String::new();
+            for (i, seg) in line.split('`').enumerate() {
+                if i > 0 {
+                    out.push('`');
+                }
+                out.push_str(&if i % 2 == 0 { link_line(seg) } else { seg.to_string() });
+            }
+            lines.push(out);
+        }
+    }
+    lines.join("\n")
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +222,7 @@ mod tests {
         assert_eq!(doc.title, "A Title");
         assert!(!doc.html.contains("[["), "wikilink brackets should be stripped");
         assert!(!doc.html.contains("]]"));
+        assert!(doc.html.contains(r##"<a class="wikilink" data-target="Other Page" href="#">Other Page</a>"##));
         assert!(doc.html.contains("<table"), "tables should render");
         assert!(doc.html.contains("checkbox"), "task lists should render as checkboxes");
         assert!(doc.html.contains("<del>"), "strikethrough should render");
@@ -178,5 +235,14 @@ mod tests {
         let file = dir.path().join("doc.txt");
         std::fs::write(&file, "hello").unwrap();
         assert!(render_file(&file).is_err());
+    }
+
+    #[test]
+    fn wikilinks_become_anchors_except_in_code() {
+        let out = link_wikilinks("A [[x|Label <b>]] and [[y#Head]] and [[#Self]].\n`[[code]]`\n```\n[[fenced]]\n```");
+        assert!(out.contains(r##"<a class="wikilink" data-target="x" href="#">Label &lt;b&gt;</a>"##));
+        assert!(out.contains(r#"data-target="y""#));
+        assert!(out.contains("and Self."), "same-page anchors become plain text");
+        assert!(out.contains("`[[code]]`") && out.contains("[[fenced]]"));
     }
 }
