@@ -59,7 +59,9 @@ First run: no `config.json` in `app_config_dir()` (or no `vault_path` in it) →
 
 Config persists as plain `serde_json`-written JSON — no config-management plugin, three fields doesn't warrant one. As of §6 below, `AppConfig` actually has three path fields (`vault_path`, `raw_path`, `inbox_path`), so "three fields doesn't warrant a plugin" now describes the real shape, not just the vault.
 
-## 6. Raw & Inbox heads-up badges + new-session button (topbar, omnipresent)
+## 6. Shared header, ☰ page menu, heads-up badges (omnipresent)
+
+**Shared header (0.12.0):** one `#app-header` above every page except the viewer (own Back) and first-run Settings (no vault yet; `hasVault` via `updateBackButtonVisibility`). Left to right: ☰, page title (`VIEW_TITLES`, set in `syncHeader`), index status (search page only), then 📥 inbox, raw, 🌐 shared raw, Claude, Refresh as icon-only buttons with `data-tooltip`. Icons are inline Lucide SVG (`.ico`). ☰ opens `#nav-menu` (Search, Transcripts, Skills, Map, Settings; ⌘/Ctrl 1-4 and ⌘, shortcuts). Plugin drift shows as a red count on the Skills row and a dot on ☰ (`renderSkillsBadge`); Transcripts hides with `hide_transcripts_page`. The old per-page "← Back" buttons are gone; page-specific controls (map stats, transcript filters) stay in a slim per-page `.topbar`. The text below describes the badges and predates the layout change; the emoji it names are now the icons above.
 
 Four always-visible controls in the topbar (not inside the search panel, so they're always on-screen): a 📄 badge for unprocessed raw notes (`wiki-builder`'s job), a 📥 badge for pending inbox items (`inbox-review`'s job), a 🌐 badge for the total unprocessed raw-file count across the *whole shared* Second Brain vault (added in v3 — see below), and a Claude-icon button that opens a blank new Claude Desktop session (`claude://code/new`, no `q` param — nothing pre-filled, unlike the badges below). The Claude icon itself is copied from the locally-installed `/Applications/Claude.app` bundle (`ion-dist/images/claude_app_icon.png`) rather than recreated, so it matches the real app icon exactly.
 
@@ -186,7 +188,7 @@ Two bugs still instructive for the current code (the v2-era ones moved to `CHANG
 
 **`showView()` consolidation:** adding the Skills view (and restyling Settings to the same full-section pattern) meant six top-level sections toggling `.hidden` on each other — real, now-materially-worse copy-paste that four separate `show*View()` functions used to hand-duplicate. Replaced with one `showView(name)` helper driven by a `VIEWS` name→element map; each `show*View()` keeps its own extra setup (search reset, map graph rebuild, fresh `get_skills` fetch) but delegates the toggling.
 
-**Settings — Done button → header Back button:** `#done-settings-btn` is gone; `#settings-back-btn` lives in the new header, gated by the same `config.vault_path` check the old Done-button visibility used (renamed `updateDoneVisibility` → `updateBackButtonVisibility`). First-run behavior is unchanged — no back button until a vault is configured, since there's nothing to go back to yet.
+**Settings — Done button → header Back button:** `#done-settings-btn` is gone; `#settings-back-btn` lived in the header (removed in 0.12.0 for the ☰ menu), gated by the same `config.vault_path` check the old Done-button visibility used (renamed `updateDoneVisibility` → `updateBackButtonVisibility`). First-run behavior is unchanged — no back button until a vault is configured, since there's nothing to go back to yet.
 
 **Version row:** Settings' new Diagnostics group shows the real running version via `window.__TAURI__.app.getVersion()` (the `app` module, exposed globally the same way `updater`/`process`/`dialog` already are via `withGlobalTauri` — no new import style introduced), fetched fresh each time Settings opens. Reads the actual build-time `tauri.conf.json` version rather than a string that could drift from a release.
 

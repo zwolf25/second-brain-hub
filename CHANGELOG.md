@@ -2,6 +2,10 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.12.0
+- **☰ navigation menu:** one shared header (`#app-header`) replaces per-page topbars; page switching moves to a ☰ menu (Search, Transcripts, Skills, Map, Settings, ⌘/Ctrl 1-4 and ⌘,). Header keeps inbox, raw, shared raw, Claude, Refresh as icon-only buttons with tooltips; emoji replaced by inline Lucide SVG. Skills drift = red count on its menu row + dot on ☰. All "← Back" buttons removed (viewer keeps its own); sections now `flex: 1` under the header. Checked in headless Chrome against a stubbed Tauri backend (search, menu open, Skills, Transcripts, Settings, 520px width); not checked: real Tauri window, Windows, Ctrl shortcuts, hide-Transcripts setting, tooltip placement at the far-right edge.
+- **Recently updated list:** the heading said "16 changed" while only 5 rows showed. It now reads "showing 5 of 16 changed since your last visit" with a "Show all 16" / "Show fewer" row (`recent_wikis` takes an optional `limit`, default 5; JS `showAllRecent`). Row dates use `formatUpdated` ("Today", "Yesterday", "Oct 28") instead of raw ISO strings; date-only values are read as local days to avoid a one-day shift. Update-banner text now flexes (`flex: 1`) so its buttons sit together. Not verified: visual check in the app.
+
 ## 0.11.1
 - **Wiki-cleanup overdue banner:** the `/wiki-cleanup` skill (Phase 6 step 4) now writes today's date to `<vault>/logs/wiki-cleanup-last-run.txt`; Rust `get_cleanup_age` (parent of `raw_path` + that file) returns days since, and `refreshCleanupBanner` shows a 🧹 banner on the search page at 28+ days or when no stamp exists. Button = `launchClaudeCommand("/wiki-cleanup")`; "Later" snoozes 7 days (`localStorage` `cleanupSnoozeUntil`). Not verified: banner click-through. Users on an older skill copy never get a stamp, so they see the banner until the skill updates and runs once.
 - **Fix:** update-banner buttons no longer squash (`white-space: nowrap; flex: none`).

@@ -1,1 +1,1 @@
-The search page now reminds you to run /wiki-cleanup when it has been 4+ weeks (one click opens Claude Desktop with the command ready), and the Update & Restart button no longer looks squashed.
+Pages now live in a new ☰ menu (Search, Transcripts, Skills, Map, Settings, with ⌘1–4 shortcuts), so the header keeps just your Inbox, Raw and Shared counts, Claude Code and Refresh as icons with hover tips. "Recently updated" now shows how many of the changed wikis it lists (with a Show all link) and friendlier dates.

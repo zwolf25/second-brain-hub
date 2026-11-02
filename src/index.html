@@ -10,13 +10,32 @@
 
   <body>
     <main class="app">
+      <!-- One header for every page except the viewer; page switching lives in the ☰ menu.
+           Icons: Lucide (ISC), inline so they follow the text color in light/dark. -->
+      <header id="app-header" class="topbar app-header hidden">
+        <button id="menu-btn" class="topbar-btn icon-btn tip-left" aria-label="Menu" aria-haspopup="true" aria-expanded="false" title="Menu" data-tooltip="Menu"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg><span id="menu-dot" class="menu-dot hidden"></span></button>
+        <span id="page-title" class="page-title">Search</span>
+        <span id="status" class="status"></span>
+        <span class="grow"></span>
+        <button id="inbox-badge" class="topbar-btn hidden" title="Inbox — items waiting for you. Click to run /inbox-review" data-tooltip="Inbox — items waiting for you. Click to run /inbox-review"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg><span id="inbox-count-num">0</span></button>
+        <button id="raw-badge" class="topbar-btn hidden" title="Raw notes — unprocessed. Click to run /wiki-builder" data-tooltip="Raw notes — unprocessed. Click to run /wiki-builder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg><span id="raw-count-num">0</span></button>
+        <button id="shared-raw-badge" class="topbar-btn hidden" title="Shared raw files — unprocessed across the whole shared Second Brain. No action needed; click to open the folder." data-tooltip="Shared raw files — unprocessed across the whole shared Second Brain. No action needed; click to open the folder."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><span id="shared-raw-count-num">0</span></button>
+        <button id="new-session-btn" class="topbar-btn icon-btn" title="New Claude Code session" data-tooltip="New Claude Code session">
+          <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
+        </button>
+        <button id="reindex-btn" class="topbar-btn icon-btn" aria-label="Refresh" title="Refresh — re-index now" data-tooltip="Refresh — re-index now"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
+      </header>
+      <nav id="nav-menu" class="nav-menu hidden" aria-label="Pages">
+        <a id="search-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search<kbd>⌘1</kbd></a>
+        <a id="transcripts-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>Transcripts<kbd>⌘2</kbd></a>
+        <a id="skills-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>Skills<span class="nav-tag hidden"></span><kbd>⌘3</kbd></a>
+        <a id="map-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Map<kbd>⌘4</kbd></a>
+        <hr />
+        <a id="settings-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>Settings<kbd>⌘,</kbd></a>
+      </nav>
       <!-- Settings: shown until a valid vault folder is configured, and
            reopened later by the ⚙ button to adjust any of the three paths -->
       <section id="onboarding" class="settings-view hidden">
-        <header class="topbar">
-          <button id="settings-back-btn" class="topbar-btn hidden" title="Back to search">← Back</button>
-          <span class="viewer-title">Settings</span>
-        </header>
         <ul class="settings-list">
           <li class="settings-group-label">Folders</li>
           <li class="setting-row">
@@ -130,20 +149,6 @@
 
       <!-- Main search view -->
       <section id="search-view" class="search-view hidden">
-        <header class="topbar">
-          <span id="status" class="status"></span>
-          <button id="raw-badge" class="topbar-btn hidden" title="Unprocessed raw notes — click to run /wiki-builder">📄 <span id="raw-count-num">0</span></button>
-          <button id="inbox-badge" class="topbar-btn hidden" title="Items in your inbox — click to run /inbox-review">📥 <span id="inbox-count-num">0</span></button>
-          <button id="shared-raw-badge" class="topbar-btn hidden" title="Unprocessed raw files across the whole shared Second Brain — no action needed, just a freshness signal. Click to open the folder.">🌐 <span id="shared-raw-count-num">0</span></button>
-          <button id="transcripts-btn" class="topbar-btn" title="Teams transcripts, converted to markdown">📝 Transcripts</button>
-          <button id="skills-badge" class="topbar-btn" title="See all skills" data-tooltip="See all skills">🧩 Skills</button>
-          <button id="new-session-btn" class="topbar-btn" title="Start a new Claude Code session">
-            <img src="/assets/claude-icon.png" alt="" class="claude-icon" />
-          </button>
-          <button id="map-btn" class="topbar-btn" title="Vault Neural Map">🧠 Map</button>
-          <button id="reindex-btn" class="topbar-btn" title="Re-index now">⟳ Refresh</button>
-          <button id="settings-badge" class="topbar-btn" title="Settings">⚙️</button>
-        </header>
         <div id="cleanup-banner" class="update-banner hidden">
           <span class="update-banner-text">🧹 <span id="cleanup-banner-text"></span></span>
           <button id="cleanup-banner-btn" class="topbar-btn">Run /wiki-cleanup</button><button id="cleanup-banner-snooze-btn" class="topbar-btn" title="Hide this for a week">Later</button>
@@ -186,8 +191,6 @@
            standalone preview against real vault data before this view was built. -->
       <section id="map-view" class="map-view hidden">
         <header class="topbar">
-          <button id="map-back-btn" class="topbar-btn" title="Back to search">← Back</button>
-          <span class="viewer-title">Vault Neural Map</span>
           <span id="map-stats" class="map-stats"></span>
         </header>
         <div class="map-canvas-wrap">
@@ -200,10 +203,6 @@
       <!-- Skills catalog: every skill in the shared vault's skills-repo,
            newest first, searchable, one click to run in Claude Code. -->
       <section id="skills-view" class="skills-view hidden">
-        <header class="topbar">
-          <button id="skills-back-btn" class="topbar-btn" title="Back to search">← Back</button>
-          <span class="viewer-title">Skills</span>
-        </header>
         <div id="update-banner" class="update-banner hidden">
           <span class="update-banner-text">✨ <strong id="update-banner-count"></strong> skill plugin(s) are behind the shared vault.</span>
           <button id="update-banner-btn" class="topbar-btn">Update in Claude Code</button><button id="update-banner-refresh-btn" class="topbar-btn" title="Re-check whether the plugins are still behind">Refresh</button>
@@ -219,8 +218,6 @@
            (zero tokens). Double-click a row to open its markdown in the viewer. -->
       <section id="transcripts-view" class="skills-view hidden">
         <header class="topbar">
-          <button id="transcripts-back-btn" class="topbar-btn" title="Back to search">← Back</button>
-          <span class="viewer-title">Transcripts</span>
           <span id="transcripts-status" class="map-stats"></span>
           <input id="transcripts-search" type="search" class="transcripts-search" placeholder="Search names and summaries…" aria-label="Search transcripts" />
           <label class="transcripts-toggle"><input id="transcripts-show-dups" type="checkbox" /> <span id="transcripts-dups-label">Suspect downloads</span></label>

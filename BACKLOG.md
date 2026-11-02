@@ -41,3 +41,4 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 | TD-9 | Index timing logged on every reindex; measured 594 ms for 218 real docs, so incremental indexing is not built (see Not doing) | 0.11.0 |
 | — | Clickable wikilinks + child wikis, backlinks, wiki-family search filter, "new since last visit" markers | 0.11.0 |
 | F-6 | Wiki-cleanup overdue banner (4+ weeks via `logs/wiki-cleanup-last-run.txt`, one-click `/wiki-cleanup`) | 0.11.1 |
+| F-7 | ☰ page menu + shared icon header; "showing N of M" Recently updated with Show all; readable dates | 0.12.0 |

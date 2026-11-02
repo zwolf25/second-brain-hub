@@ -778,13 +778,13 @@ fn search_vault(state: State<Arc<AppState>>, query: String, family: Option<Strin
 }
 
 #[tauri::command]
-fn recent_wikis(state: State<Arc<AppState>>, since: Option<String>, family: Option<String>) -> Result<search::RecentWikis, String> {
+fn recent_wikis(state: State<Arc<AppState>>, since: Option<String>, family: Option<String>, limit: Option<usize>) -> Result<search::RecentWikis, String> {
     let allowed = family_filter(&state, family);
     let guard = state.tantivy.lock().unwrap();
     let Some((idx, fields)) = guard.as_ref() else {
         return Ok(search::RecentWikis { items: vec![], new_count: 0 });
     };
-    search::recent(idx, fields, 5, since.as_deref(), allowed.as_ref()).map_err(|e| e.to_string())
+    search::recent(idx, fields, limit.unwrap_or(5), since.as_deref(), allowed.as_ref()).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]

@@ -13,7 +13,6 @@ const mapView = document.querySelector("#map-view");
 const skillsView = document.querySelector("#skills-view");
 const transcriptsView = document.querySelector("#transcripts-view");
 const onboardingError = document.querySelector("#onboarding-error");
-const settingsBackBtn = document.querySelector("#settings-back-btn");
 const searchInput = document.querySelector("#search-input");
 const statusEl = document.querySelector("#status");
 const resultsEl = document.querySelector("#results");
@@ -169,7 +168,8 @@ showTranscriptsPageBox.addEventListener("change", async () => {
 
 async function updateBackButtonVisibility() {
   const config = await invoke("get_config");
-  settingsBackBtn.classList.toggle("hidden", !config.vault_path);
+  hasVault = Boolean(config.vault_path);
+  syncHeader();
 }
 
 // --- Default app for .md files ---
@@ -218,8 +218,20 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
 const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView };
+const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts" };
+let currentView = "search";
+let hasVault = false;
 function showView(name) {
   for (const [key, el] of Object.entries(VIEWS)) el.classList.toggle("hidden", key !== name);
+  currentView = name;
+  syncHeader();
+}
+
+// The shared header is hidden on the viewer (it has its own Back) and on first-run Settings (nowhere to go yet).
+function syncHeader() {
+  document.querySelector("#app-header").classList.toggle("hidden", currentView === "viewer" || (currentView === "onboarding" && !hasVault));
+  document.querySelector("#page-title").textContent = VIEW_TITLES[currentView] ?? "";
+  statusEl.classList.toggle("hidden", currentView !== "search");
 }
 
 async function showSettingsView() {
@@ -1562,7 +1574,7 @@ async function runSearch() {
   if (query) {
     results = await invoke("search_vault", { query, family });
   } else {
-    ({ items: results, new_count: newCount } = await invoke("recent_wikis", { since: sinceSeen, family }));
+    ({ items: results, new_count: newCount } = await invoke("recent_wikis", { since: sinceSeen, family, limit: showAllRecent ? 1000 : 5 }));
   }
   if (searchInput.value.trim() !== query) return; // stale: user kept typing
   resultsEl.innerHTML = "";
@@ -1570,7 +1582,12 @@ async function runSearch() {
   if (!query && results.length) {
     const h = document.createElement("li");
     h.className = "results-heading";
-    h.textContent = newCount ? `Recently updated · ${newCount} changed since your last visit` : "Recently updated";
+    // The list is capped at 5 unless expanded, so say how many of the changed wikis it shows.
+    h.textContent = !newCount
+      ? "Recently updated"
+      : results.length < newCount
+        ? `Recently updated · showing ${results.length} of ${newCount} changed since your last visit`
+        : `Recently updated · ${newCount} changed since your last visit`;
     resultsEl.appendChild(h);
   }
   for (const r of results) {
@@ -1580,11 +1597,35 @@ async function runSearch() {
     li.innerHTML = `
       <div class="result-title">${escapeHtml(r.title)}${isNew ? '<span class="badge-new">New</span>' : ""}</div>
       <div class="result-snippet">${r.snippet || ""}</div>
-      <div class="result-meta">${escapeHtml(r.updated || "")}</div>
+      <div class="result-meta">${escapeHtml(formatUpdated(r.updated))}</div>
     `;
     li.addEventListener("dblclick", () => openInViewer(r.path));
     resultsEl.appendChild(li);
   }
+  if (!query && (showAllRecent || newCount > results.length)) {
+    const more = document.createElement("li");
+    more.className = "results-more";
+    more.textContent = showAllRecent ? "Show fewer" : `Show all ${newCount}`;
+    more.addEventListener("click", () => {
+      showAllRecent = !showAllRecent;
+      runSearch();
+    });
+    resultsEl.appendChild(more);
+  }
+}
+
+let showAllRecent = false;
+
+// "Today" / "Yesterday" / "Oct 28" / "Oct 28, 2025" from a frontmatter `updated` value.
+function formatUpdated(iso) {
+  if (!iso) return "";
+  const d = iso.length > 10 ? new Date(iso) : new Date(`${iso}T00:00:00`); // date-only = local day, not UTC
+  if (isNaN(d)) return iso;
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
 function escapeHtml(s) {
@@ -1656,6 +1697,34 @@ document.querySelector("#cleanup-banner-snooze-btn").addEventListener("click", (
   cleanupBanner.classList.add("hidden");
 });
 
+// --- ☰ page menu ---
+
+const menuBtn = document.querySelector("#menu-btn");
+const navMenu = document.querySelector("#nav-menu");
+
+function toggleMenu(open) {
+  navMenu.classList.toggle("hidden", !open);
+  menuBtn.setAttribute("aria-expanded", String(open));
+}
+
+menuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMenu(navMenu.classList.contains("hidden"));
+});
+document.addEventListener("click", () => toggleMenu(false)); // item clicks bubble here after their own handler
+navMenu.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") e.target.click();
+});
+document.querySelector("#search-btn").addEventListener("click", showSearchView);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") toggleMenu(false);
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !hasVault) return;
+  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, ",": showSettingsView }[e.key];
+  if (!go || (go === showTranscriptsView && document.querySelector("#transcripts-btn").classList.contains("hidden"))) return;
+  e.preventDefault();
+  go();
+});
+
 const skillsBadge = document.querySelector("#skills-badge");
 let pluginDrift = [];
 
@@ -1664,12 +1733,14 @@ let pluginDrift = [];
 function renderSkillsBadge(drift) {
   pluginDrift = drift;
   const isDrifted = drift.length > 0;
-  skillsBadge.textContent = isDrifted ? "✨ Skills" : "🧩 Skills";
-  const tooltip = isDrifted
-    ? `${drift.length} skill plugin(s) are behind the shared vault — update from the Skills page.`
-    : "See all skills";
-  skillsBadge.title = tooltip;
-  skillsBadge.dataset.tooltip = tooltip;
+  const tag = skillsBadge.querySelector(".nav-tag");
+  tag.textContent = drift.length;
+  tag.classList.toggle("hidden", !isDrifted);
+  skillsBadge.querySelector("kbd").classList.toggle("hidden", isDrifted);
+  document.querySelector("#menu-dot").classList.toggle("hidden", !isDrifted);
+  const menuTip = isDrifted ? `Menu — ${drift.length} skill plugin(s) behind the shared vault` : "Menu";
+  menuBtn.title = menuTip;
+  menuBtn.dataset.tooltip = menuTip;
   skillsUpdateBannerCount.textContent = drift.length;
   skillsUpdateBanner.classList.toggle("hidden", !isDrifted);
 }
@@ -1684,7 +1755,6 @@ document.querySelector("#update-banner-refresh-btn").addEventListener("click", a
 });
 
 skillsBadge.addEventListener("click", showSkillsView);
-document.querySelector("#skills-back-btn").addEventListener("click", showSearchView);
 document.querySelector("#update-banner-btn").addEventListener("click", () => {
   launchClaudeCommand(`Update these outdated Second Brain plugins: ${pluginDrift.map((d) => d.key).join(", ")}`);
 });
@@ -1754,6 +1824,7 @@ document.querySelector("#new-session-btn").addEventListener("click", () => {
 
 window.addEventListener("DOMContentLoaded", async () => {
   const config = await invoke("get_config");
+  hasVault = Boolean(config.vault_path);
   if (config.vault_path) {
     showSearchView();
   } else {
@@ -1789,8 +1860,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (path) openInViewer(path);
   });
 
-  settingsBackBtn.addEventListener("click", showSearchView);
-
   document.querySelector("#settings-badge").addEventListener("click", showSettingsView);
 
   document.querySelector("#reindex-btn").addEventListener("click", () => {
@@ -1802,14 +1871,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   document.querySelector("#transcripts-btn").addEventListener("click", showTranscriptsView);
-  document.querySelector("#transcripts-back-btn").addEventListener("click", showSearchView);
   invoke("get_config").then(applyTranscriptsNav);
   listen("transcripts-updated", () => {
     if (!transcriptsView.classList.contains("hidden")) loadTranscripts();
   });
 
   document.querySelector("#map-btn").addEventListener("click", showMapView);
-  document.querySelector("#map-back-btn").addEventListener("click", showSearchView);
 
   document.querySelector("#export-logs-btn").addEventListener("click", async () => {
     const dir = await invoke("log_dir_path");
