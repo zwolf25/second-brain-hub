@@ -1632,6 +1632,30 @@ async function refreshSharedRawBadge() {
   renderSharedRawCount(await invoke("get_shared_raw_count"));
 }
 
+// --- /wiki-cleanup overdue banner: the skill stamps logs/wiki-cleanup-last-run.txt ---
+
+const CLEANUP_DUE_DAYS = 28;
+const cleanupBanner = document.querySelector("#cleanup-banner");
+
+async function refreshCleanupBanner() {
+  const age = await invoke("get_cleanup_age");
+  const snoozed = Number(localStorage.getItem("cleanupSnoozeUntil") || 0) > Date.now();
+  // undefined/null outer = no raw folder configured; inner null = no stamp yet.
+  const due = age !== null && !snoozed && (age === undefined || age === null || age >= CLEANUP_DUE_DAYS);
+  cleanupBanner.classList.toggle("hidden", !due);
+  if (!due) return;
+  document.querySelector("#cleanup-banner-text").textContent =
+    age == null
+      ? "No /wiki-cleanup run recorded yet. A monthly run keeps your wikis accurate."
+      : `You haven't run /wiki-cleanup in ${Math.floor(age / 7)} weeks.`;
+}
+
+document.querySelector("#cleanup-banner-btn").addEventListener("click", () => launchClaudeCommand("/wiki-cleanup"));
+document.querySelector("#cleanup-banner-snooze-btn").addEventListener("click", () => {
+  localStorage.setItem("cleanupSnoozeUntil", String(Date.now() + 7 * 864e5));
+  cleanupBanner.classList.add("hidden");
+});
+
 const skillsBadge = document.querySelector("#skills-badge");
 let pluginDrift = [];
 
@@ -1740,6 +1764,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Long-running sessions (the app sits in the tray) would otherwise only see an update after a restart.
   setInterval(() => checkForAppUpdate(), 60 * 60 * 1000);
   checkPluginDrift();
+  refreshCleanupBanner();
 
   listen("index-status", (event) => {
     renderStatus(event.payload);

@@ -1,1 +1,1 @@
-Wiki links in the viewer are now clickable (Back returns you), every page shows which other wikis link to it, and the search page can be limited to one wiki family. "Recently updated" now marks wikis changed since your last visit. Intel Macs now get an installer too.
+The search page now reminds you to run /wiki-cleanup when it has been 4+ weeks (one click opens Claude Desktop with the command ready), and the Update & Restart button no longer looks squashed.

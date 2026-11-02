@@ -19,3 +19,4 @@ Run on the installed build (or `npx tauri build --debug --no-bundle --config '{"
 15. **Backlinks:** a linked-to page ends with "Linked from (N)"; clicking a chip opens that page.
 16. **Family filter:** the dropdown next to the search box lists hubs; choosing one limits both the empty-box list and search results to that hub and its children; "All wikis" restores everything.
 17. **New markers:** relaunch after a wiki changed; the "Recently updated" heading says how many changed and those rows show a green New badge.
+18. **Wiki-cleanup banner:** with no `logs/wiki-cleanup-last-run.txt` (or one dated 4+ weeks ago) the search page shows a 🧹 banner; "Run /wiki-cleanup" opens Claude Desktop with the command filled in; "Later" hides it for a week; a fresh stamp makes it disappear after relaunch.

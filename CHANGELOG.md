@@ -2,6 +2,10 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.11.1
+- **Wiki-cleanup overdue banner:** the `/wiki-cleanup` skill (Phase 6 step 4) now writes today's date to `<vault>/logs/wiki-cleanup-last-run.txt`; Rust `get_cleanup_age` (parent of `raw_path` + that file) returns days since, and `refreshCleanupBanner` shows a 🧹 banner on the search page at 28+ days or when no stamp exists. Button = `launchClaudeCommand("/wiki-cleanup")`; "Later" snoozes 7 days (`localStorage` `cleanupSnoozeUntil`). Not verified: banner click-through. Users on an older skill copy never get a stamp, so they see the banner until the skill updates and runs once.
+- **Fix:** update-banner buttons no longer squash (`white-space: nowrap; flex: none`).
+
 ## 0.11.0
 - **Wikilinks, backlinks, families, "new" markers:** (1) The viewer renders `[[wikilinks]]` as links (`render::link_wikilinks`, code spans and fences untouched) and a click resolves the target in the vault (`resolve_wikilink`) and opens it; Back walks `viewerHistory`; an unknown target toasts instead of failing silently. Child-wiki lists in hubs navigate for free. (2) "Linked from (N)" row under each vault page (`get_backlinks`, `graph::backlinks`, case-insensitive). (3) Search-page family select (`get_families`, `family` argument on `search_vault`/`recent_wikis`): hub plus children; the filter fetches 1000 candidates then keeps 30 because a post-filter on the usual top 30 would starve small families. (4) "Recently updated" shows how many wikis changed since the previous launch (`new_count`) and badges new rows; the baseline is `localStorage.lastSeenAt`, re-stamped every launch. Tests: `families_backlinks_and_resolve`, `wikilinks_become_anchors_except_in_code`, family/new-count asserts in `rebuild_and_fuzzy_search_round_trip`. Not clicked through by Claude: link navigation, Back, backlinks row, family select, New badges. Also ships the Intel Mac build (TD-5), index timing (TD-9) and the ARCHITECTURE/CHANGELOG split (TD-8).
 

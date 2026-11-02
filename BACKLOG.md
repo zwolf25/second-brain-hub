@@ -40,3 +40,4 @@ Created 2026-11-01 from a read of the code, ARCHITECTURE.md §12, CI config and 
 | TD-8 | ARCHITECTURE.md trimmed 76 KB to 58 KB: sections in order, release-by-release detail and the v2 AI Search archive moved to `CHANGELOG.md`, stale risks fixed; hub-release step 3 now writes CHANGELOG.md | 0.11.0 |
 | TD-9 | Index timing logged on every reindex; measured 594 ms for 218 real docs, so incremental indexing is not built (see Not doing) | 0.11.0 |
 | — | Clickable wikilinks + child wikis, backlinks, wiki-family search filter, "new since last visit" markers | 0.11.0 |
+| F-6 | Wiki-cleanup overdue banner (4+ weeks via `logs/wiki-cleanup-last-run.txt`, one-click `/wiki-cleanup`) | 0.11.1 |

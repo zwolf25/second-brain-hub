@@ -702,6 +702,35 @@ fn get_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.raw_count.lock().unwrap()
 }
 
+/// Days since `/wiki-cleanup` last stamped `<vault>/logs/wiki-cleanup-last-run.txt`
+/// (first line `YYYY-MM-DD`). `None` = no raw folder configured; `Some(None)` = no readable stamp.
+#[tauri::command]
+fn get_cleanup_age(state: State<Arc<AppState>>) -> Option<Option<i64>> {
+    let raw = state.config.lock().unwrap().raw_path.clone()?;
+    let stamp = raw.parent()?.join("logs/wiki-cleanup-last-run.txt");
+    Some(cleanup_age_days(&stamp, chrono_today_days()))
+}
+
+fn chrono_today_days() -> i64 {
+    (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) / 86400) as i64
+}
+
+/// Days from civil date (Howard Hinnant's algorithm), 1970-01-01 = 0.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468
+}
+
+fn cleanup_age_days(stamp: &std::path::Path, today: i64) -> Option<i64> {
+    let text = std::fs::read_to_string(stamp).ok()?;
+    let mut it = text.trim().get(..10)?.split('-').map(|n| n.parse::<i64>().ok());
+    let (y, m, d) = (it.next()??, it.next()??, it.next()??);
+    Some(today - days_from_civil(y, m, d))
+}
+
 #[tauri::command]
 fn get_inbox_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.inbox_count.lock().unwrap()
@@ -1016,6 +1045,7 @@ pub fn run() {
             set_transcript_category,
             get_audit_status,
             get_raw_count,
+            get_cleanup_age,
             get_inbox_count,
             get_shared_raw_count,
             get_plugin_drift,
@@ -1048,4 +1078,22 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod cleanup_age_tests {
+    use super::*;
+
+    #[test]
+    fn stamp_age_in_days() {
+        let dir = std::env::temp_dir().join("sbh-cleanup-age-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("stamp.txt");
+        std::fs::write(&f, "2026-10-04\nwiki-cleanup\n").unwrap();
+        let today = days_from_civil(2026, 11, 1);
+        assert_eq!(cleanup_age_days(&f, today), Some(28));
+        std::fs::write(&f, "garbage").unwrap();
+        assert_eq!(cleanup_age_days(&f, today), None);
+        assert_eq!(cleanup_age_days(&dir.join("missing"), today), None);
+    }
 }

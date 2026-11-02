@@ -440,6 +440,12 @@ button:hover {
   color: #6b5b0a;
 }
 
+/* Long release notes must wrap the text, never squeeze the buttons. */
+.update-banner .topbar-btn {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* Custom tooltip — the native `title` attribute's hover delay is too slow
    for a quick glance, and some embedded webviews suppress it outright.
    `title` is kept too, for accessibility. */
