@@ -41,6 +41,11 @@ fn stem(path: &str) -> &str {
 
 /// `allowed` (a wiki family's stems) restricts results; it is applied after ranking,
 /// so more candidates are fetched to still fill the page.
+/// The frontend sets snippets via `innerHTML`; tantivy's `to_html()` already escapes, so plain-text fallbacks must too.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 pub fn search(index: &Index, fields: &Fields, query_text: &str, allowed: Option<&HashSet<String>>) -> Result<Vec<SearchResult>> {
     let query_text = query_text.trim();
     if query_text.is_empty() {
@@ -137,7 +142,7 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str, allowed: Option<
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| {
                 let body = get(fields.body);
-                body.chars().take(220).collect()
+                escape_html(&body.chars().take(220).collect::<String>())
             });
 
         results.push(SearchResult {
@@ -179,13 +184,7 @@ pub fn recent(index: &Index, fields: &Fields, n: usize, since: Option<&str>, all
             .map(str::trim)
             .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('>'))
             .unwrap_or("");
-        let snippet = prose
-            .chars()
-            .take(220)
-            .collect::<String>()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
+        let snippet = escape_html(&prose.chars().take(220).collect::<String>());
         all.push(SearchResult { path, title: get(fields.title), snippet, updated: get(fields.updated) });
     }
     all.sort_by(|a, b| b.updated.cmp(&a.updated));
@@ -197,6 +196,11 @@ pub fn recent(index: &Index, fields: &Fields, n: usize, since: Option<&str>, all
 #[cfg(test)]
 mod tests {
     use crate::index;
+
+    #[test]
+    fn fallback_snippet_escape_neutralizes_markup() {
+        assert_eq!(super::escape_html("<img src=x onerror=1> & \"q\""), "&lt;img src=x onerror=1&gt; &amp; \"q\"");
+    }
 
     #[test]
     fn exact_match_outranks_fuzzy_typo_match() {

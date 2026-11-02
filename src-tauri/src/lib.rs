@@ -21,7 +21,18 @@ use notify_debouncer_mini::Debouncer;
 use search::SearchResult;
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// Lock that survives poisoning: after a panic in one command thread the data is still
+/// usable, and `unwrap()` would instead panic every later command until restart.
+trait LockRecover<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T>;
+}
+impl<T> LockRecover<T> for Mutex<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 use tantivy::Index as TantivyIndex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -75,7 +86,7 @@ static PENDING_OPEN_PATH: Mutex<Option<String>> = Mutex::new(None);
 /// on macOS). A frontend that catches both just re-renders the same doc.
 fn handle_open_file(app: &AppHandle, path: String) {
     show_main(app);
-    *PENDING_OPEN_PATH.lock().unwrap() = Some(path.clone());
+    *PENDING_OPEN_PATH.lock_recover() = Some(path.clone());
     let _ = app.emit("open-file-request", path);
 }
 
@@ -132,14 +143,14 @@ fn sync_tray(app: &AppHandle, on: bool) -> tauri::Result<()> {
 /// watcher's debounced change callback.
 fn reindex(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let vault_path = { state.config.lock().unwrap().vault_path.clone() };
+    let vault_path = { state.config.lock_recover().vault_path.clone() };
 
     let Some(vault_path) = vault_path else {
         return;
     };
 
     let set_status = |s: IndexStatus| {
-        *state.status.lock().unwrap() = s;
+        *state.status.lock_recover() = s;
         let _ = app.emit("index-status", s);
     };
 
@@ -149,7 +160,7 @@ fn reindex(app: &AppHandle) {
     match index::rebuild(&state.index_dir, &vault_path) {
         Ok(count) => match index::open(&state.index_dir) {
             Ok((idx, fields)) => {
-                *state.tantivy.lock().unwrap() = Some((idx, fields));
+                *state.tantivy.lock_recover() = Some((idx, fields));
                 tracing::info!("indexed {count} docs from {} in {} ms", vault_path.display(), started.elapsed().as_millis());
                 set_status(IndexStatus::Idle { count });
                 // Push a fresh link graph on every reindex (launch, manual, or
@@ -173,7 +184,7 @@ fn start_watching(app: &AppHandle, vault_path: &std::path::Path) {
     let state = app.state::<Arc<AppState>>();
     let app_for_watcher = app.clone();
     match watcher::start(vault_path, move || reindex(&app_for_watcher)) {
-        Ok(debouncer) => *state.watcher.lock().unwrap() = Some(debouncer),
+        Ok(debouncer) => *state.watcher.lock_recover() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start file watcher: {e}"),
     }
 }
@@ -183,19 +194,19 @@ fn start_watching(app: &AppHandle, vault_path: &std::path::Path) {
 /// same shape as `reindex`/`start_watching` above.
 fn recount_raw(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let raw_path = state.config.lock().unwrap().raw_path.clone();
+    let raw_path = state.config.lock_recover().raw_path.clone();
     let count = raw_path.map(|p| counts::count_unprocessed_raw(&p));
     tracing::info!("raw count: {count:?}");
-    *state.raw_count.lock().unwrap() = count;
+    *state.raw_count.lock_recover() = count;
     let _ = app.emit("raw-count-status", count);
 }
 
 fn recount_inbox(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let inbox_path = state.config.lock().unwrap().inbox_path.clone();
+    let inbox_path = state.config.lock_recover().inbox_path.clone();
     let count = inbox_path.map(|p| counts::count_inbox_items(&p));
     tracing::info!("inbox count: {count:?}");
-    *state.inbox_count.lock().unwrap() = count;
+    *state.inbox_count.lock_recover() = count;
     let _ = app.emit("inbox-count-status", count);
 }
 
@@ -203,7 +214,7 @@ fn start_watching_raw(app: &AppHandle, raw_path: &std::path::Path) {
     let state = app.state::<Arc<AppState>>();
     let app_for_watcher = app.clone();
     match watcher::start(raw_path, move || recount_raw(&app_for_watcher)) {
-        Ok(debouncer) => *state.raw_watcher.lock().unwrap() = Some(debouncer),
+        Ok(debouncer) => *state.raw_watcher.lock_recover() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start raw-folder watcher: {e}"),
     }
 }
@@ -212,7 +223,7 @@ fn start_watching_inbox(app: &AppHandle, inbox_path: &std::path::Path) {
     let state = app.state::<Arc<AppState>>();
     let app_for_watcher = app.clone();
     match watcher::start(inbox_path, move || recount_inbox(&app_for_watcher)) {
-        Ok(debouncer) => *state.inbox_watcher.lock().unwrap() = Some(debouncer),
+        Ok(debouncer) => *state.inbox_watcher.lock_recover() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start inbox-folder watcher: {e}"),
     }
 }
@@ -222,10 +233,10 @@ fn start_watching_inbox(app: &AppHandle, inbox_path: &std::path::Path) {
 /// `raw/` folder too.
 fn recount_shared_raw(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let shared_raw_path = state.config.lock_recover().shared_raw_path.clone();
     let count = shared_raw_path.map(|p| counts::count_unprocessed_raw(&p));
     tracing::info!("shared raw count: {count:?}");
-    *state.shared_raw_count.lock().unwrap() = count;
+    *state.shared_raw_count.lock_recover() = count;
     let _ = app.emit("shared-raw-count-status", count);
 }
 
@@ -233,14 +244,14 @@ fn start_watching_shared_raw(app: &AppHandle, shared_raw_path: &std::path::Path)
     let state = app.state::<Arc<AppState>>();
     let app_for_watcher = app.clone();
     match watcher::start(shared_raw_path, move || recount_shared_raw(&app_for_watcher)) {
-        Ok(debouncer) => *state.shared_raw_watcher.lock().unwrap() = Some(debouncer),
+        Ok(debouncer) => *state.shared_raw_watcher.lock_recover() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start shared-raw-folder watcher: {e}"),
     }
 }
 
 /// Shared vault root, derived from the shared-raw path the same way `check_plugin_drift` does.
 fn shared_root(state: &AppState) -> Option<PathBuf> {
-    let cfg = state.config.lock().unwrap();
+    let cfg = state.config.lock_recover();
     cfg.shared_raw_path.as_deref().and_then(|p| p.parent()).map(|p| p.to_path_buf())
 }
 
@@ -260,8 +271,8 @@ fn audit_for(app: &AppHandle, rules_version: u32) -> Option<audit::Audit> {
 /// Blocking (file IO); callers off the main thread only.
 fn scan_transcripts(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let Some(src) = state.config.lock().unwrap().transcripts_path.clone() else { return };
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let Some(src) = state.config.lock_recover().transcripts_path.clone() else { return };
+    let _guard = state.transcripts_scan.lock_recover();
     let rules = load_rules(&state);
     match transcripts::scan(&src, &state.transcripts_dir, &rules) {
         Ok(r) => {
@@ -289,8 +300,8 @@ fn scan_transcripts(app: &AppHandle) {
 
 /// Applies the auto rules (caller holds `transcripts_scan`). Failures are kept for the page banner and retried next scan.
 fn run_auto_move(state: &AppState) {
-    let rules = state.config.lock().unwrap().auto_rules.clone();
-    *state.move_error.lock().unwrap() = if rules.iter().any(|r| r.enabled && r.action == "move") {
+    let rules = state.config.lock_recover().auto_rules.clone();
+    *state.move_error.lock_recover() = if rules.iter().any(|r| r.enabled && r.action == "move") {
         match transcripts::auto_move(&state.transcripts_dir, &rules) {
             Ok(r) if !r.errors.is_empty() => Some(r.errors.join("; ")),
             Ok(r) => (r.skipped > 0).then(|| format!("{} transcript(s) could not be moved; will retry", r.skipped)),
@@ -305,7 +316,7 @@ fn run_auto_move(state: &AppState) {
 /// Caller holds `transcripts_scan`. Failures only log; the next scan retries. No Claude task is involved.
 fn sync_raw_stubs(state: &AppState) {
     let (rules, raw) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock_recover();
         (cfg.auto_rules.clone(), cfg.raw_path.clone())
     };
     if let Some(raw) = raw {
@@ -329,7 +340,7 @@ fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
     let state = app.state::<Arc<AppState>>();
     let app_for_watcher = app.clone();
     match watcher::start(path, move || scan_transcripts(&app_for_watcher)) {
-        Ok(debouncer) => *state.transcripts_watcher.lock().unwrap() = Some(debouncer),
+        Ok(debouncer) => *state.transcripts_watcher.lock_recover() = Some(debouncer),
         Err(e) => tracing::warn!("failed to start transcripts-folder watcher: {e}"),
     }
 }
@@ -339,7 +350,7 @@ fn start_watching_transcripts(app: &AppHandle, path: &std::path::Path) {
 fn default_autostart(app: &AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
     let state = app.state::<Arc<AppState>>();
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock_recover();
     if cfg.autostart_default_applied {
         return;
     }
@@ -364,7 +375,7 @@ fn begin_transcripts(app: &AppHandle, path: &std::path::Path) {
 /// `autodetect_shared_raw` points that path at `<root>/raw`.
 fn check_plugin_drift(app: &AppHandle) {
     let state = app.state::<Arc<AppState>>();
-    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let shared_raw_path = state.config.lock_recover().shared_raw_path.clone();
     let Some(root) = shared_raw_path.as_deref().and_then(|p| p.parent()) else {
         return;
     };
@@ -374,12 +385,12 @@ fn check_plugin_drift(app: &AppHandle) {
     let installed_path = home.join(".claude/plugins/installed_plugins.json");
     let drift = plugins::check_drift(root, &installed_path);
     tracing::info!("plugin drift: {} plugin(s) behind", drift.len());
-    *state.plugin_drift.lock().unwrap() = drift;
+    *state.plugin_drift.lock_recover() = drift;
 }
 
 #[tauri::command]
 fn get_config(state: State<Arc<AppState>>) -> AppConfig {
-    state.config.lock().unwrap().clone()
+    state.config.lock_recover().clone()
 }
 
 #[tauri::command]
@@ -395,12 +406,12 @@ fn set_vault_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> 
     }
 
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.vault_path = Some(path.clone());
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
 
-    *state.watcher.lock().unwrap() = None; // drop old watcher before starting a new one
+    *state.watcher.lock_recover() = None; // drop old watcher before starting a new one
     start_watching(&app, &path);
     reindex(&app);
     Ok(())
@@ -409,7 +420,7 @@ fn set_vault_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> 
 #[tauri::command]
 fn refresh_plugin_drift(app: AppHandle) -> Vec<plugins::PluginDrift> {
     check_plugin_drift(&app);
-    app.state::<Arc<AppState>>().plugin_drift.lock().unwrap().clone()
+    app.state::<Arc<AppState>>().plugin_drift.lock_recover().clone()
 }
 
 #[tauri::command]
@@ -439,11 +450,11 @@ fn set_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> Re
         return Err("That folder doesn't exist.".into());
     }
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.raw_path = Some(path.clone());
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
-    *state.raw_watcher.lock().unwrap() = None;
+    *state.raw_watcher.lock_recover() = None;
     start_watching_raw(&app, &path);
     recount_raw(&app);
     Ok(())
@@ -456,11 +467,11 @@ fn set_inbox_path(app: AppHandle, state: State<Arc<AppState>>, path: String) -> 
         return Err("That folder doesn't exist.".into());
     }
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.inbox_path = Some(path.clone());
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
-    *state.inbox_watcher.lock().unwrap() = None;
+    *state.inbox_watcher.lock_recover() = None;
     start_watching_inbox(&app, &path);
     recount_inbox(&app);
     Ok(())
@@ -473,11 +484,11 @@ fn set_shared_raw_path(app: AppHandle, state: State<Arc<AppState>>, path: String
         return Err("That folder doesn't exist.".into());
     }
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.shared_raw_path = Some(path.clone());
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
-    *state.shared_raw_watcher.lock().unwrap() = None;
+    *state.shared_raw_watcher.lock_recover() = None;
     start_watching_shared_raw(&app, &path);
     recount_shared_raw(&app);
     check_plugin_drift(&app);
@@ -496,11 +507,11 @@ fn set_transcripts_path(app: AppHandle, state: State<Arc<AppState>>, path: Strin
         return Err("That folder doesn't exist.".into());
     }
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.transcripts_path = Some(path.clone());
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
-    *state.transcripts_watcher.lock().unwrap() = None;
+    *state.transcripts_watcher.lock_recover() = None;
     begin_transcripts(&app, &path);
     Ok(())
 }
@@ -508,22 +519,22 @@ fn set_transcripts_path(app: AppHandle, state: State<Arc<AppState>>, path: Strin
 /// "Stop syncing": halts the watcher; converted files and state stay, so re-enabling reuses them.
 #[tauri::command]
 fn stop_transcripts(state: State<Arc<AppState>>) -> Result<(), String> {
-    *state.transcripts_watcher.lock().unwrap() = None;
-    let mut cfg = state.config.lock().unwrap();
+    *state.transcripts_watcher.lock_recover() = None;
+    let mut cfg = state.config.lock_recover();
     cfg.transcripts_path = None;
     config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn dismiss_transcripts(state: State<Arc<AppState>>) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock_recover();
     cfg.transcripts_dismissed = true;
     config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn set_show_transcripts_page(state: State<Arc<AppState>>, show: bool) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock_recover();
     cfg.hide_transcripts_page = !show;
     config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
@@ -548,7 +559,7 @@ fn set_transcript_category(app: AppHandle, state: State<Arc<AppState>>, vtts: Ve
     if !rules.categories.contains(&category) {
         return Err(format!("Unknown category: {category}"));
     }
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     let changes = transcripts::set_category(&state.transcripts_dir, &vtts, &category).map_err(|e| e.to_string())?;
     if let Some(a) = audit_for(&app, rules.version) {
         let events: Vec<_> = changes
@@ -573,29 +584,29 @@ fn get_audit_status(app: AppHandle) -> audit::Status {
 
 #[tauri::command]
 fn set_transcripts_hidden(state: State<Arc<AppState>>, vtts: Vec<String>, hidden: bool) -> Result<(), String> {
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::set_hidden(&state.transcripts_dir, &vtts, hidden).map_err(|e| e.to_string())
 }
 
 /// "Add to Second Brain": writes a raw-note stub per transcript and hides it. Returns (written, skipped).
 #[tauri::command]
 fn add_transcripts_to_raw(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(usize, usize), String> {
-    let raw = state.config.lock().unwrap().raw_path.clone().ok_or("Choose your raw folder in Settings first.")?;
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let raw = state.config.lock_recover().raw_path.clone().ok_or("Choose your raw folder in Settings first.")?;
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::add_to_raw(&state.transcripts_dir, &raw, &vtts).map_err(|e| format!("{e:#}"))
 }
 
 /// Transcripts an enabled VoC rule has flagged, for the "ready for VoC" button.
 #[tauri::command]
 fn get_voc_ready(state: State<Arc<AppState>>) -> Vec<String> {
-    let rules = state.config.lock().unwrap().auto_rules.clone();
+    let rules = state.config.lock_recover().auto_rules.clone();
     transcripts::voc_ready(&state.transcripts_dir, &rules)
 }
 
 /// The one-time "add future transcripts automatically?" offer was answered.
 #[tauri::command]
 fn dismiss_raw_stub_offer(state: State<Arc<AppState>>) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock_recover();
     cfg.raw_stub_offer_dismissed = true;
     config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
@@ -604,7 +615,7 @@ fn dismiss_raw_stub_offer(state: State<Arc<AppState>>) -> Result<(), String> {
 /// Recorded once the user confirms the automatic-VoC consent screen.
 #[tauri::command]
 fn set_voc_consent(state: State<Arc<AppState>>, on: bool) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock_recover();
     cfg.voc_consent = on;
     config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())
 }
@@ -617,45 +628,45 @@ fn get_voc_category(state: State<Arc<AppState>>) -> String {
 
 #[tauri::command]
 fn mark_transcripts_voc(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::mark_voc(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn set_transcripts_voc_skip(state: State<Arc<AppState>>, vtts: Vec<String>, skip: bool) -> Result<(), String> {
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::set_voc_skip(&state.transcripts_dir, &vtts, skip).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn undo_move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<transcripts::MoveReport, String> {
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::undo_move(&state.transcripts_dir, &vtts).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
 fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String) -> Result<transcripts::MoveReport, String> {
-    let _guard = state.transcripts_scan.lock().unwrap();
+    let _guard = state.transcripts_scan.lock_recover();
     transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))
 }
 
 /// Saves the whole ordered rule list and applies it once right away.
 #[tauri::command]
 fn set_auto_rules(app: AppHandle, state: State<Arc<AppState>>, rules: Vec<config::AutoRule>) -> Result<(), String> {
-    let no_raw = state.config.lock().unwrap().raw_path.is_none();
+    let no_raw = state.config.lock_recover().raw_path.is_none();
     if let Some(bad) = rules.iter().find(|r| {
         !["move", "log-it", "voc", "hide"].contains(&r.action.as_str()) || (r.action == "move" && r.dest.is_none()) || (r.action == "log-it" && r.enabled && no_raw)
     }) {
         return Err(format!("Rule {} is incomplete (a move rule needs a folder; \"Add to Second Brain\" needs your raw folder set in Settings).", bad.id));
     }
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock_recover();
         cfg.auto_rules = rules;
         config::save(&state.config_dir, &cfg).map_err(|e| e.to_string())?;
     }
     std::thread::spawn(move || {
         let state = app.state::<Arc<AppState>>();
-        let _guard = state.transcripts_scan.lock().unwrap();
+        let _guard = state.transcripts_scan.lock_recover();
         run_auto_move(&state);
         sync_raw_stubs(&state);
         let _ = app.emit("transcripts-updated", ());
@@ -685,7 +696,7 @@ fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn get_move_error(state: State<Arc<AppState>>) -> Option<String> {
-    state.move_error.lock().unwrap().clone()
+    state.move_error.lock_recover().clone()
 }
 
 #[tauri::command]
@@ -699,14 +710,14 @@ fn get_transcripts(state: State<Arc<AppState>>) -> Vec<transcripts::Row> {
 
 #[tauri::command]
 fn get_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
-    *state.raw_count.lock().unwrap()
+    *state.raw_count.lock_recover()
 }
 
 /// Days since `/wiki-cleanup` last stamped `<vault>/logs/wiki-cleanup-last-run.txt`
 /// (first line `YYYY-MM-DD`). `None` = no raw folder configured; `Some(None)` = no readable stamp.
 #[tauri::command]
 fn get_cleanup_age(state: State<Arc<AppState>>) -> Option<Option<i64>> {
-    let raw = state.config.lock().unwrap().raw_path.clone()?;
+    let raw = state.config.lock_recover().raw_path.clone()?;
     let stamp = raw.parent()?.join("logs/wiki-cleanup-last-run.txt");
     Some(cleanup_age_days(&stamp, chrono_today_days()))
 }
@@ -733,17 +744,17 @@ fn cleanup_age_days(stamp: &std::path::Path, today: i64) -> Option<i64> {
 
 #[tauri::command]
 fn get_inbox_count(state: State<Arc<AppState>>) -> Option<usize> {
-    *state.inbox_count.lock().unwrap()
+    *state.inbox_count.lock_recover()
 }
 
 #[tauri::command]
 fn get_shared_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
-    *state.shared_raw_count.lock().unwrap()
+    *state.shared_raw_count.lock_recover()
 }
 
 #[tauri::command]
 fn get_plugin_drift(state: State<Arc<AppState>>) -> Vec<plugins::PluginDrift> {
-    state.plugin_drift.lock().unwrap().clone()
+    state.plugin_drift.lock_recover().clone()
 }
 
 /// Resolved fresh on every call (same shared-vault-root logic as
@@ -751,7 +762,7 @@ fn get_plugin_drift(state: State<Arc<AppState>>) -> Vec<plugins::PluginDrift> {
 /// would only risk staleness for no measurable benefit.
 #[tauri::command]
 fn get_skills(state: State<Arc<AppState>>) -> Vec<skills::SkillInfo> {
-    let shared_raw_path = state.config.lock().unwrap().shared_raw_path.clone();
+    let shared_raw_path = state.config.lock_recover().shared_raw_path.clone();
     let Some(root) = shared_raw_path.as_deref().and_then(|p| p.parent()) else {
         return vec![];
     };
@@ -761,7 +772,7 @@ fn get_skills(state: State<Arc<AppState>>) -> Vec<skills::SkillInfo> {
 /// Stems of a wiki family (the hub plus its children), or None for "all wikis".
 fn family_filter(state: &AppState, family: Option<String>) -> Option<std::collections::HashSet<String>> {
     let hub = family.filter(|f| !f.is_empty())?;
-    let vault = state.config.lock().unwrap().vault_path.clone()?;
+    let vault = state.config.lock_recover().vault_path.clone()?;
     let mut set: std::collections::HashSet<String> = graph::families(&vault).remove(&hub).unwrap_or_default().into_iter().collect();
     set.insert(hub);
     Some(set)
@@ -770,7 +781,7 @@ fn family_filter(state: &AppState, family: Option<String>) -> Option<std::collec
 #[tauri::command]
 fn search_vault(state: State<Arc<AppState>>, query: String, family: Option<String>) -> Result<Vec<SearchResult>, String> {
     let allowed = family_filter(&state, family);
-    let guard = state.tantivy.lock().unwrap();
+    let guard = state.tantivy.lock_recover();
     let Some((idx, fields)) = guard.as_ref() else {
         return Ok(vec![]);
     };
@@ -780,7 +791,7 @@ fn search_vault(state: State<Arc<AppState>>, query: String, family: Option<Strin
 #[tauri::command]
 fn recent_wikis(state: State<Arc<AppState>>, since: Option<String>, family: Option<String>, limit: Option<usize>) -> Result<search::RecentWikis, String> {
     let allowed = family_filter(&state, family);
-    let guard = state.tantivy.lock().unwrap();
+    let guard = state.tantivy.lock_recover();
     let Some((idx, fields)) = guard.as_ref() else {
         return Ok(search::RecentWikis { items: vec![], new_count: 0 });
     };
@@ -795,20 +806,20 @@ struct Family {
 
 #[tauri::command]
 fn get_families(state: State<Arc<AppState>>) -> Vec<Family> {
-    let vault = state.config.lock().unwrap().vault_path.clone();
+    let vault = state.config.lock_recover().vault_path.clone();
     vault.map(|v| graph::families(&v).into_iter().map(|(hub, kids)| Family { hub, children: kids.len() }).collect()).unwrap_or_default()
 }
 
 #[tauri::command]
 fn resolve_wikilink(state: State<Arc<AppState>>, target: String) -> Option<String> {
-    let vault = state.config.lock().unwrap().vault_path.clone()?;
+    let vault = state.config.lock_recover().vault_path.clone()?;
     graph::resolve(&vault, &target)
 }
 
 /// Only for files inside the vault, so a same-named file elsewhere never shows vault backlinks.
 #[tauri::command]
 fn get_backlinks(state: State<Arc<AppState>>, path: String) -> Vec<graph::Backlink> {
-    let Some(vault) = state.config.lock().unwrap().vault_path.clone() else { return vec![] };
+    let Some(vault) = state.config.lock_recover().vault_path.clone() else { return vec![] };
     let p = std::path::Path::new(&path);
     match p.file_stem().and_then(|s| s.to_str()) {
         Some(stem) if p.starts_with(&vault) => graph::backlinks(&vault, stem),
@@ -818,7 +829,7 @@ fn get_backlinks(state: State<Arc<AppState>>, path: String) -> Vec<graph::Backli
 
 #[tauri::command]
 fn get_vault_graph(state: State<Arc<AppState>>) -> graph::GraphData {
-    let vault_path = state.config.lock().unwrap().vault_path.clone();
+    let vault_path = state.config.lock_recover().vault_path.clone();
     match vault_path {
         Some(p) => graph::build_graph(&p),
         None => graph::GraphData::default(),
@@ -832,7 +843,7 @@ fn log_dir_path(state: State<Arc<AppState>>) -> String {
 
 #[tauri::command]
 fn get_index_status(state: State<Arc<AppState>>) -> IndexStatus {
-    *state.status.lock().unwrap()
+    *state.status.lock_recover()
 }
 
 #[tauri::command]
@@ -859,7 +870,7 @@ fn write_for_edit(path: String, header: String, body: String) -> Result<(), Stri
 
 #[tauri::command]
 fn get_launch_file_path()-> Option<String> {
-    PENDING_OPEN_PATH.lock().unwrap().take()
+    PENDING_OPEN_PATH.lock_recover().take()
 }
 
 // `None` means "can't tell" (only macOS has a real Launch Services query;
@@ -1095,5 +1106,23 @@ mod cleanup_age_tests {
         std::fs::write(&f, "garbage").unwrap();
         assert_eq!(cleanup_age_days(&f, today), None);
         assert_eq!(cleanup_age_days(&dir.join("missing"), today), None);
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn lock_recover_survives_a_poisoned_mutex() {
+        let m = Arc::new(Mutex::new(1));
+        let m2 = Arc::clone(&m);
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("poison it");
+        })
+        .join();
+        assert!(m.lock().is_err(), "mutex should be poisoned");
+        assert_eq!(*m.lock_recover(), 1);
     }
 }

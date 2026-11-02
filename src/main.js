@@ -980,6 +980,7 @@ function showViewer() {
 
 const viewerEditBtn = document.querySelector("#viewer-edit-btn");
 const viewerSaveBtn = document.querySelector("#viewer-save-btn");
+const viewerAskBtn = document.querySelector("#viewer-ask-claude-btn");
 const viewerCancelBtn = document.querySelector("#viewer-cancel-btn");
 const viewerEditor = document.querySelector("#viewer-editor");
 let editHeader = "";
@@ -994,6 +995,7 @@ function exitEdit() {
   viewerSaveBtn.classList.add("hidden");
   viewerCancelBtn.classList.add("hidden");
   viewerEditBtn.classList.remove("hidden");
+  viewerAskBtn.classList.remove("hidden");
 }
 
 async function startEdit() {
@@ -1010,6 +1012,7 @@ async function startEdit() {
   viewerContentEl.classList.add("hidden");
   viewerEditor.classList.remove("hidden");
   viewerEditBtn.classList.add("hidden");
+  viewerAskBtn.classList.add("hidden");
   viewerSaveBtn.classList.remove("hidden");
   viewerCancelBtn.classList.remove("hidden");
   viewerEditor.focus();
@@ -1908,6 +1911,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       showView("transcripts");
       transcriptsList.scrollTop = transcriptsScroll;
     } else showSearchView();
+  });
+  viewerAskBtn.addEventListener("click", () => {
+    if (currentViewerPath) launchClaudeCommand(`Read ${currentViewerPath} and answer my question about it: `);
   });
   document.querySelector("#viewer-open-external-btn").addEventListener("click", () => {
     if (currentViewerPath) {

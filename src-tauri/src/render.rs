@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{html, Event, Options, Parser};
 use serde::Serialize;
 use std::path::Path;
 
@@ -29,19 +29,53 @@ pub fn render_file(path: &Path) -> Result<RenderedDoc> {
     let filename_fallback = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled");
     let parsed = frontmatter::parse(&raw, filename_fallback);
 
+    let (_, body) = frontmatter::split_frontmatter(&raw);
+    let html_out = markdown_to_html(body);
+
+    Ok(RenderedDoc { html: html_out, title: parsed.title, source_path: path.to_string_lossy().to_string() })
+}
+
+fn markdown_to_html(body: &str) -> String {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let (_, body) = frontmatter::split_frontmatter(&raw);
     let linked = link_wikilinks(body);
-    let parser = Parser::new_ext(&linked, options);
+    let parser = Parser::new_ext(&linked, options).filter_map(sanitize_event);
     let mut html_out = String::new();
     html::push_html(&mut html_out, parser);
+    html_out
+}
 
-    Ok(RenderedDoc { html: html_out, title: parsed.title, source_path: path.to_string_lossy().to_string() })
+/// Raw HTML in a vault file is shown as text, not rendered (the CSP blocks scripts, but external
+/// images and misleading links would still render). Only the anchors `link_wikilinks` writes pass
+/// through; HTML comments (e.g. `<!-- wiki-processed -->`) are dropped.
+fn sanitize_event(ev: Event) -> Option<Event> {
+    match ev {
+        Event::Html(s) | Event::InlineHtml(s) => {
+            let t = s.trim();
+            if t.starts_with("<!--") {
+                None
+            } else if is_wikilink_tag(t) || t == "</a>" {
+                Some(Event::InlineHtml(s))
+            } else {
+                Some(Event::Text(s))
+            }
+        }
+        other => Some(other),
+    }
+}
+
+/// Exactly the open tag `link_line` emits (target is `esc`aped, so it holds no quote or angle bracket).
+fn is_wikilink_tag(t: &str) -> bool {
+    const HEAD: &str = "<a class=\"wikilink\" data-target=\"";
+    const TAIL: &str = "\" href=\"#\">";
+    t.len() >= HEAD.len() + TAIL.len()
+        && t.starts_with(HEAD)
+        && t.ends_with(TAIL)
+        && !t[HEAD.len()..t.len() - TAIL.len()].contains(['"', '<', '>'])
 }
 
 fn esc(s: &str) -> String {
@@ -151,6 +185,23 @@ pub fn write_for_edit(path: &Path, header: &str, body: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_html_is_shown_as_text_but_wikilinks_still_link() {
+        let h = markdown_to_html("See [[Other Page|other]].\n\n<img src=\"https://x.test/p.gif\"> and <script>alert(1)</script>\n\n<!-- wiki-processed -->\n\nuse <date> here\n");
+        assert!(h.contains("<a class=\"wikilink\" data-target=\"Other Page\" href=\"#\">other</a>"), "{h}");
+        assert!(!h.contains("<img") && !h.contains("<script"), "{h}");
+        assert!(h.contains("&lt;img") && h.contains("&lt;script&gt;"), "{h}");
+        assert!(!h.contains("wiki-processed"), "{h}");
+        assert!(h.contains("&lt;date&gt;"), "{h}");
+    }
+
+    #[test]
+    fn forged_wikilink_tag_with_extra_attributes_is_escaped() {
+        let h = markdown_to_html("<a class=\"wikilink\" data-target=\"x\" href=\"#\" onclick=\"evil()\">go</a>");
+        assert!(!h.contains("<a class"), "{h}"); // tag is text, so onclick is inert
+        assert!(h.contains("&lt;a class"), "{h}");
+    }
 
     #[test]
     fn edit_roundtrip_preserves_frontmatter_and_wikilinks() {

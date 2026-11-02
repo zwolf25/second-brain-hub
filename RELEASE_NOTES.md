@@ -1,1 +1,1 @@
-Pages now live in a new ☰ menu (Search, Transcripts, Skills, Map, Settings, with ⌘1–4 shortcuts), so the header keeps just your Inbox, Raw and Shared counts, Claude Code and Refresh as icons with hover tips. "Recently updated" now shows how many of the changed wikis it lists (with a Show all link) and friendlier dates.
+New "✦ Ask Claude" button in the page viewer opens a Claude session with the page's path ready for your question. Pages now show raw HTML as plain text, and the app recovers from an internal lock error instead of crashing.
