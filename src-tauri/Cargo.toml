@@ -27,7 +27,7 @@ tantivy = "0.22"
 walkdir = "2"
 serde_yaml = "0.9"
 notify = "6"
-notify-debouncer-mini = "0.4"
+notify-debouncer-mini = "0.7"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
