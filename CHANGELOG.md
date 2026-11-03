@@ -2,6 +2,9 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.13.1
+- **Fix: banner Refresh never rechecked plugin drift.** The Skills-page banner's Refresh button (`#update-banner-refresh-btn`) called `checkPluginDrift()` → `get_plugin_drift`, which only returns the launch-time cache, so it kept saying "5 behind" after the plugins were updated (found live: `installed_plugins.json` already matched the vault). It now calls `refresh_plugin_drift` like the header Refresh icon. Not verified live. Windows untested.
+
 ## 0.13.0
 - **"✦ Ask Claude" viewer button (F-10):** `#viewer-ask-claude-btn` between Edit and Open externally, hidden while editing (`startEdit`/`exitEdit`). Click calls `launchClaudeCommand("Read <currentViewerPath> and answer my question about it: ")` (`claude://code/new?q=`, no `folder=`). Not verified: first real click on Mac (possible permission prompt, since the session isn't rooted in the vault); Windows.
 - **Viewer escapes raw HTML (TD-11):** `render::markdown_to_html` + `sanitize_event` turn `Event::Html`/`InlineHtml` into text, drop comments, and let through only the app's own `<a class="wikilink" data-target href="#">`. Placeholders like `<date>` now show instead of vanishing. Also `search::escape_html` for the plain-text fallback snippet, which went unescaped into `innerHTML`. 3 new tests.

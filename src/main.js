@@ -1753,7 +1753,7 @@ async function checkPluginDrift() {
 }
 
 document.querySelector("#update-banner-refresh-btn").addEventListener("click", async () => {
-  await checkPluginDrift();
+  renderSkillsBadge(await invoke("refresh_plugin_drift")); // re-reads installed_plugins.json; get_plugin_drift only returns the launch-time cache
   toast(pluginDrift.length ? `Still ${pluginDrift.length} skill plugin(s) behind.` : "All skill plugins are up to date.");
 });
 

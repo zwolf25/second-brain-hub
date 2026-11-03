@@ -1,1 +1,1 @@
-New "✦ Ask Claude" button in the page viewer opens a Claude session with the page's path ready for your question. Pages now show raw HTML as plain text, and the app recovers from an internal lock error instead of crashing.
+Fixes the Refresh button on the "skill plugins are behind" banner, which kept showing the old count after you had updated.
