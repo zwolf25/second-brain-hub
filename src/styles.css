@@ -871,6 +871,90 @@ button:hover {
   color: #666;
 }
 
+/* Map page: Graph | Link health tabs */
+.seg {
+  display: inline-flex;
+}
+.seg .topbar-btn {
+  border-radius: 0;
+}
+.seg .topbar-btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.seg .topbar-btn:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: 0;
+}
+.seg .topbar-btn.on {
+  background: #eef2ff;
+  border-color: #396cd8;
+  font-weight: 600;
+}
+.map-health {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.health-sec {
+  padding: 1em 1.2em 0.3em;
+  font-weight: 600;
+}
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.6em 1.2em;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+}
+.health-main {
+  flex: 1;
+  min-width: 0;
+}
+.health-pg {
+  font-weight: 600;
+}
+.health-dead {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: #fdecea;
+  color: #b3261e;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 0.3em;
+}
+.health-sug {
+  font-size: 0.85em;
+  color: #555;
+  margin-top: 2px;
+}
+.health-ro {
+  margin-left: 0.5em;
+  padding: 0 0.5em;
+  border-radius: 999px;
+  background: #fff3a3;
+  color: #7a6500;
+  font-size: 0.7em;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .seg .topbar-btn.on {
+    background: #2a2f45;
+  }
+  .health-row {
+    background: #1f1f1f;
+    border-color: #333;
+  }
+  .health-dead {
+    background: #4a2220;
+    color: #ffb4ab;
+  }
+  .health-sug {
+    color: #aaa;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .results-more {
     color: #6ab0ff;

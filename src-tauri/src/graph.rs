@@ -190,9 +190,150 @@ pub fn build_graph(vault_path: &Path) -> GraphData {
     GraphData { nodes, edges }
 }
 
+#[derive(Serialize)]
+pub struct BrokenTarget {
+    target: String,
+    /// Closest existing page name, if one is near enough to be a likely typo.
+    suggestion: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct BrokenPage {
+    title: String,
+    path: String,
+    targets: Vec<BrokenTarget>,
+}
+
+#[derive(Serialize)]
+pub struct Orphan {
+    title: String,
+    path: String,
+    /// Existing pages this one links to (natural places to link back from).
+    related: Vec<String>,
+}
+
+#[derive(Serialize, Default)]
+pub struct LinkHealth {
+    broken: Vec<BrokenPage>,
+    orphans: Vec<Orphan>,
+}
+
+/// Text with fenced blocks and inline code removed, so wikilink syntax shown as an example is not a link.
+fn strip_code(text: &str) -> String {
+    let mut out = String::new();
+    let mut fenced = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        let mut inline = false;
+        for ch in line.chars() {
+            if ch == '`' {
+                inline = !inline;
+            } else if !inline {
+                out.push(ch);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            cur.push((prev[j] + usize::from(ca != *cb)).min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// Nearest page stem to a dead target: a containing/contained name (>= 4 chars) or a small edit distance.
+fn suggest(target: &str, stems: &[&String]) -> Option<String> {
+    let t = target.to_lowercase();
+    stems
+        .iter()
+        .filter_map(|s| {
+            let l = s.to_lowercase();
+            let contained = t.len() >= 4 && l.len() >= 4 && (l.contains(&t) || t.contains(&l));
+            let d = if contained { 0 } else { edit_distance(&t, &l) };
+            (d <= (t.len() / 3).max(2)).then_some((d, *s))
+        })
+        .min_by_key(|(d, s)| (*d, s.len()))
+        .map(|(_, s)| s.clone())
+}
+
+/// Dead wikilinks (no page by that stem, exact or case-insensitive, like the viewer's `resolve`) and
+/// pages nothing links to. Links in code are ignored; self-links do not count as inbound.
+pub fn link_health(vault_path: &Path) -> LinkHealth {
+    let texts = read_texts(vault_path);
+    let lower: HashMap<String, &String> = texts.keys().map(|k| (k.to_lowercase(), k)).collect();
+    let stems: Vec<&String> = texts.keys().collect();
+    let mut inbound: BTreeSet<String> = BTreeSet::new();
+    let mut broken = Vec::new();
+    let mut outbound: HashMap<&String, Vec<String>> = HashMap::new();
+    for (id, (path, text)) in &texts {
+        let mut dead = Vec::new();
+        for target in wikilink_targets(&strip_code(text)) {
+            match lower.get(&target.to_lowercase()) {
+                Some(real) => {
+                    if *real != id {
+                        inbound.insert(real.to_lowercase());
+                        outbound.entry(id).or_default().push((*real).clone());
+                    }
+                }
+                None => dead.push(BrokenTarget { suggestion: suggest(&target, &stems), target }),
+            }
+        }
+        if !dead.is_empty() {
+            let title = crate::frontmatter::parse(text, id).title;
+            broken.push(BrokenPage { title, path: path.clone(), targets: dead });
+        }
+    }
+    let mut orphans: Vec<Orphan> = texts
+        .iter()
+        .filter(|(id, _)| !inbound.contains(&id.to_lowercase()))
+        .map(|(id, (path, text))| {
+            let mut related = outbound.remove(id).unwrap_or_default();
+            related.truncate(3);
+            Orphan { title: crate::frontmatter::parse(text, id).title, path: path.clone(), related }
+        })
+        .collect();
+    broken.sort_by_key(|b| b.title.to_lowercase());
+    orphans.sort_by_key(|o| o.title.to_lowercase());
+    LinkHealth { broken, orphans }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_health_finds_dead_links_orphans_and_ignores_code() {
+        let vault = tempfile::tempdir().unwrap();
+        let w = |n: &str, t: &str| std::fs::write(vault.path().join(n), t).unwrap();
+        w("pricing-strategy.md", "# Pricing\n\nSee [[Value-Selling]] and [[pricing-strat]] and [[nowhere-near]].\n\n```\n[[in-fence]]\n```\nUse `[[inline]]` syntax.");
+        w("value-selling.md", "# Value Selling\n\nBack to [[pricing-strategy]].");
+        w("lonely.md", "# Lonely\n\nPoints at [[value-selling]].");
+
+        let h = link_health(vault.path());
+        assert_eq!(h.broken.len(), 1, "only pricing-strategy has dead links");
+        let targets: Vec<_> = h.broken[0].targets.iter().map(|t| (t.target.as_str(), t.suggestion.as_deref())).collect();
+        assert!(targets.contains(&("pricing-strat", Some("pricing-strategy"))));
+        assert!(targets.contains(&("nowhere-near", None)));
+        assert_eq!(targets.len(), 2, "case-insensitive link and code examples are not broken");
+        assert_eq!(h.orphans.len(), 1);
+        assert_eq!(h.orphans[0].related, vec!["value-selling"]);
+    }
 
     #[test]
     fn builds_nodes_and_dedupes_undirected_edges() {

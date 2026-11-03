@@ -1325,8 +1325,96 @@ function rebuildMapSim(graphData) {
   mapDraw();
 }
 
+// --- Link health tab: dead [[wikilinks]] and orphan pages, with a scoped "Fix with Claude" per row. ---
+const mapTabGraph = document.querySelector("#map-tab-graph");
+const mapTabHealth = document.querySelector("#map-tab-health");
+const mapHealthEl = document.querySelector("#map-health");
+const healthCountEl = document.querySelector("#health-count");
+const mapCanvasWrap = mapCanvas.parentElement;
+const mapCaptionEl = document.querySelector("#map-caption");
+
+let mapTab = "graph"; // kept so Back from the viewer returns to the tab you left
+function showMapTab(tab) {
+  mapTab = tab;
+  const health = tab === "health";
+  mapTabGraph.classList.toggle("on", !health);
+  mapTabHealth.classList.toggle("on", health);
+  mapCanvasWrap.classList.toggle("hidden", health);
+  mapCaptionEl.classList.toggle("hidden", health);
+  mapStatsEl.classList.toggle("hidden", health);
+  mapHealthEl.classList.toggle("hidden", !health);
+  if (health) renderLinkHealth();
+}
+
+function healthRow({ title, path, bodyHtml, writable, prompt, suggestPrompt }) {
+  const li = document.createElement("div");
+  li.className = "health-row";
+  li.innerHTML = `
+    <div class="health-main">
+      <div class="health-pg">${escapeHtml(title)}${writable ? "" : '<span class="health-ro">view-only</span>'}</div>
+      ${bodyHtml}
+    </div>
+    <button class="topbar-btn" data-act="open">Open</button>
+    <button class="topbar-btn" data-act="fix">${writable ? "✦ Fix with Claude" : "✦ Suggest fix"}</button>`;
+  li.querySelector('[data-act="open"]').addEventListener("click", () => openInViewer(path, "map"));
+  li.querySelector('[data-act="fix"]').addEventListener("click", () => launchClaudeCommand(writable ? prompt : suggestPrompt));
+  return li;
+}
+
+async function renderLinkHealth() {
+  const h = await invoke("get_link_health");
+  const total = h.broken.reduce((n, b) => n + b.targets.length, 0) + h.orphans.length;
+  healthCountEl.textContent = total;
+  healthCountEl.classList.toggle("hidden", total === 0);
+  mapHealthEl.innerHTML = "";
+  const section = (text) => {
+    const d = document.createElement("div");
+    d.className = "health-sec";
+    d.textContent = text;
+    mapHealthEl.appendChild(d);
+  };
+  section(`Broken links · ${h.broken.reduce((n, b) => n + b.targets.length, 0)} on ${h.broken.length} page(s)`);
+  if (!h.broken.length) mapHealthEl.insertAdjacentHTML("beforeend", '<p class="muted" style="padding:0 1.2em">None found.</p>');
+  const writableOf = async (path) => invoke("can_edit_markdown", { path });
+  for (const b of h.broken) {
+    const writable = await writableOf(b.path);
+    const dead = b.targets.map((t) => `<span class="health-dead">[[${escapeHtml(t.target)}]]</span>`).join("");
+    const sugs = b.targets.filter((t) => t.suggestion).map((t) => `[[${escapeHtml(t.target)}]] → <b>${escapeHtml(t.suggestion)}</b>`);
+    const list = b.targets.map((t) => `- [[${t.target}]]`).join("\n");
+    mapHealthEl.appendChild(
+      healthRow({
+        title: b.title,
+        path: b.path,
+        writable,
+        bodyHtml: `<div>${dead}</div><div class="health-sug">${sugs.length ? `Did you mean: ${sugs.join(", ")}` : "No close match; the page may not exist yet."}</div>`,
+        prompt: `Fix the broken wikilinks in ${b.path}:\n${list}\nFor each, find the closest existing page and propose a retarget, or removal if nothing fits. Show me the changes and ask before editing. `,
+        suggestPrompt: `/submit-suggestion The shared wiki ${b.title} (${b.path}) has broken wikilinks:\n${list}\nSuggest creating the missing page or retargeting/removing each link. `,
+      }),
+    );
+  }
+  section(`Orphans · ${h.orphans.length} page(s) with no inbound links`);
+  if (!h.orphans.length) mapHealthEl.insertAdjacentHTML("beforeend", '<p class="muted" style="padding:0 1.2em">None found.</p>');
+  for (const o of h.orphans) {
+    const writable = await writableOf(o.path);
+    mapHealthEl.appendChild(
+      healthRow({
+        title: o.title,
+        path: o.path,
+        writable,
+        bodyHtml: `<div class="health-sug">${o.related.length ? `Links to: ${o.related.map(escapeHtml).join(", ")}` : "Links to no other page."}</div>`,
+        prompt: `Nothing links to ${o.path}. Suggest which wiki should link to it${o.related.length ? ` (try ${o.related.join(" or ")})` : ""}, show me the exact line to add, and ask before editing. `,
+        suggestPrompt: `/submit-suggestion The shared wiki ${o.title} (${o.path}) has no inbound links. Suggest which wiki should link to it${o.related.length ? ` (try ${o.related.join(" or ")})` : ""}. `,
+      }),
+    );
+  }
+}
+
+mapTabGraph.addEventListener("click", () => showMapTab("graph"));
+mapTabHealth.addEventListener("click", () => showMapTab("health"));
+
 async function showMapView() {
   showView("map");
+  showMapTab(mapTab);
   const graphData = await invoke("get_vault_graph");
   rebuildMapSim(graphData);
   if (!mapState.running) {

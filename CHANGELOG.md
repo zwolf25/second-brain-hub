@@ -2,6 +2,9 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.15.0
+- **Link health tab on the Map page (F-11):** `graph::link_health` (command `get_link_health`) lists dead `[[wikilinks]]` and orphan pages. A link is dead when no page has that stem, exact or case-insensitive (same rule as the viewer's `resolve`); links inside fenced or inline code are ignored (`strip_code`), self-links are not inbound. Each dead target carries a "did you mean" (`suggest`: name containment or small edit distance, no new crate); an orphan lists up to 3 pages it links to. UI: Graph | Link health toggle in the Map header with a count badge; each row has Open plus "✦ Fix with Claude" (`launchClaudeCommand` with a prompt scoped to that page), or "✦ Suggest fix" with a `/submit-suggestion` prompt when `can_edit_markdown` says the page is view-only. Back from the viewer returns to the tab you left (`mapTab`). 1 new test. Checked against the real shared vault: 0 broken links, 7 orphans (so the broken-link rows are only exercised by the unit test). Not verified live; Windows untested.
+
 ## 0.14.0
 - **Keyboard navigation in results (F-9):** `keydown` on `#search-input`: ↑/↓ move a `.selected` row (`.result.selected` shares the hover style), Enter opens it, Esc clears the box; Enter does nothing until a row is highlighted. Rows carry `data-path`. Double-click is unchanged.
 - **Skills "New" marker (F-15):** `SkillInfo.modified_ms` (mtime in ms) is compared with `lastSeenAt` (`sinceSeen`); skills changed since the previous launch get the same green "New" badge as wikis. Caveat: it is file mtime, so a OneDrive sync that touches a file also marks it.

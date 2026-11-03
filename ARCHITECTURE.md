@@ -26,7 +26,7 @@ Status: shipping; current version in `package.json`. Keyword search, Raw/Inbox/s
 | `logging.rs` | Rolling daily log file, 7-day retention pruning, panic hook that logs crashes to the same file |
 | `skills.rs` | Walks the shared vault's `skills-repo` for every `SKILL.md`, parses name/description/mtime for the Skills catalog (§14) |
 | `render.rs` | Markdown to HTML for the viewer (`pulldown-cmark`): wikilinks, raw HTML shown as text (`sanitize_event`), `read_for_edit`/`write_for_edit` (§13) |
-| `graph.rs` | Wikilink resolution, backlinks and the Neural Map graph |
+| `graph.rs` | Wikilink resolution, backlinks, the Neural Map graph, and `link_health` (dead links + orphans, 0.15.0; Map page "Link health" tab) |
 | `plugins.rs` | Skill-plugin drift: installed versions vs the shared vault's manifests |
 | `transcripts.rs` | Teams `.vtt` to markdown, categorization rules, move/log queue (§15) |
 | `categorize.rs` | Zero-token transcript categorization: title rules, series inheritance |

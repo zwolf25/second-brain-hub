@@ -193,13 +193,17 @@
            standalone preview against real vault data before this view was built. -->
       <section id="map-view" class="map-view hidden">
         <header class="topbar">
+          <span class="seg">
+            <button id="map-tab-graph" class="topbar-btn on">Graph</button><button id="map-tab-health" class="topbar-btn">Link health <span id="health-count" class="badge-new hidden"></span></button>
+          </span>
           <span id="map-stats" class="map-stats"></span>
         </header>
+        <div id="map-health" class="map-health hidden"></div>
         <div class="map-canvas-wrap">
           <canvas id="map-canvas"></canvas>
           <div id="map-tooltip" class="map-tooltip" hidden></div>
         </div>
-        <div class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b> &middot; double-click to <b>open it</b></div>
+        <div id="map-caption" class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b> &middot; double-click to <b>open it</b></div>
       </section>
 
       <!-- Skills catalog: every skill in the shared vault's skills-repo,

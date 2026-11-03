@@ -837,6 +837,12 @@ fn get_vault_graph(state: State<Arc<AppState>>) -> graph::GraphData {
 }
 
 #[tauri::command]
+fn get_link_health(state: State<Arc<AppState>>) -> graph::LinkHealth {
+    let vault_path = state.config.lock_recover().vault_path.clone();
+    vault_path.map(|p| graph::link_health(&p)).unwrap_or_default()
+}
+
+#[tauri::command]
 fn log_dir_path(state: State<Arc<AppState>>) -> String {
     state.log_dir.to_string_lossy().to_string()
 }
@@ -1064,6 +1070,7 @@ pub fn run() {
             get_skills,
             render_markdown,
             can_edit_markdown,
+            get_link_health,
             read_for_edit,
             write_for_edit,
             get_launch_file_path,

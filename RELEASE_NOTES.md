@@ -1,1 +1,1 @@
-New: use the arrow keys and Enter to move through and open search results (Esc clears the box), skills changed since your last visit now show a "New" badge, and you can install an app update straight from Settings after "Check for updates".
+The Map page has a new "Link health" tab that lists broken [[wikilinks]] and pages nothing links to, each with an Open button and a "Fix with Claude" button that starts a Claude session about just that page.
