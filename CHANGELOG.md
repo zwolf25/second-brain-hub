@@ -2,6 +2,14 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.14.0
+- **Keyboard navigation in results (F-9):** `keydown` on `#search-input`: ↑/↓ move a `.selected` row (`.result.selected` shares the hover style), Enter opens it, Esc clears the box; Enter does nothing until a row is highlighted. Rows carry `data-path`. Double-click is unchanged.
+- **Skills "New" marker (F-15):** `SkillInfo.modified_ms` (mtime in ms) is compared with `lastSeenAt` (`sinceSeen`); skills changed since the previous launch get the same green "New" badge as wikis. Caveat: it is file mtime, so a OneDrive sync that touches a file also marks it.
+- **CI (TD-12):** `test.yml` runs `cargo clippy --all-targets -- -D warnings` (one existing lint fixed in `graph.rs`) and `.github/dependabot.yml` checks cargo and Actions weekly. `cargo fmt --check` was **not** added: the code was never rustfmt-formatted (266 diffs at default width, 144 even at 140), so adopting it is a big noisy reformat for no behavior gain. `cargo audit` was replaced by Dependabot so an advisory can't block a release.
+- **Doc drift (TD-13):** ARCHITECTURE §2 lists all 16 source files; §12 item 0 no longer contradicts §9a.
+- Not verified live: F-9 key handling, F-15 badges, the Settings update button. Windows untested.
+- **Install the app update from Settings:** a second "Update & Restart" button (`#settings-update-btn`) sits next to "Check for updates" in the Settings Version row, shown once `pendingUpdate` is set (launch check or manual check). Both buttons share `installUpdate()` and disable together while installing. The toasts no longer say to go to the Search tab. Not verified live (needs a newer release than the installed build to exercise); Windows untested.
+
 ## 0.13.1
 - **Fix: banner Refresh never rechecked plugin drift.** The Skills-page banner's Refresh button (`#update-banner-refresh-btn`) called `checkPluginDrift()` → `get_plugin_drift`, which only returns the launch-time cache, so it kept saying "5 behind" after the plugins were updated (found live: `installed_plugins.json` already matched the vault). It now calls `refresh_plugin_drift` like the header Refresh icon. Not verified live. Windows untested.
 

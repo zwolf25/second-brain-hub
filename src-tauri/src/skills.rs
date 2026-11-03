@@ -9,6 +9,8 @@ pub struct SkillInfo {
     pub plugin: String,
     pub description: String,
     pub added: String,
+    /// mtime in ms since the epoch, for the "New since last visit" marker.
+    pub modified_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +39,7 @@ pub fn list_skills(shared_vault_root: &Path) -> Vec<SkillInfo> {
                     plugin,
                     description: fm.description,
                     added: format_date(modified),
+                    modified_ms: modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
                 },
             ))
         })

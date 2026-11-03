@@ -25,7 +25,14 @@ Status: shipping; current version in `package.json`. Keyword search, Raw/Inbox/s
 | `watcher.rs` | Debounced (400ms) filesystem watch, triggers a full reindex (vault) or recount (raw/inbox) on any change — generic over which folder it's watching |
 | `logging.rs` | Rolling daily log file, 7-day retention pruning, panic hook that logs crashes to the same file |
 | `skills.rs` | Walks the shared vault's `skills-repo` for every `SKILL.md`, parses name/description/mtime for the Skills catalog (§14) |
-| `lib.rs` | Tauri app wiring: `AppState`, command registration, startup sequence |
+| `render.rs` | Markdown to HTML for the viewer (`pulldown-cmark`): wikilinks, raw HTML shown as text (`sanitize_event`), `read_for_edit`/`write_for_edit` (§13) |
+| `graph.rs` | Wikilink resolution, backlinks and the Neural Map graph |
+| `plugins.rs` | Skill-plugin drift: installed versions vs the shared vault's manifests |
+| `transcripts.rs` | Teams `.vtt` to markdown, categorization rules, move/log queue (§15) |
+| `categorize.rs` | Zero-token transcript categorization: title rules, series inheritance |
+| `audit.rs` | Limited-data audit trail for category corrections, on the shared drive |
+| `default_handler.rs` | macOS: register/query this app as the `.md` Launch Services handler |
+| `lib.rs` | Tauri app wiring: `AppState` (locks via `lock_recover`), command registration, startup sequence |
 
 ## 3. Indexing pipeline
 
@@ -140,7 +147,7 @@ Two bugs still instructive for the current code (the v2-era ones moved to `CHANG
 
 ## 12. Known risks / open items
 
-0. In-app editing (§9a v6) not yet verified live: Cmd+S/Ctrl+S, OneDrive conflict-copy behavior after atomic rename, watcher self-write reindex, and Windows all untested.
+0. In-app editing (§9a v6): verified live on Mac 2026-10-01 (edit/save, Cmd+S, discard dialogs). Still untested: OneDrive conflict-copy behavior after atomic rename, watcher self-write reindex, read-only error path, and Windows.
 1. File-watcher robustness against OneDrive sync behavior (partial writes, transient lock files) is defensive-by-design (skip-on-error, filter `~$*`) but was only exercised by real ambient vault activity during verification on Mac, not a deliberate edit-while-running stress test, and not yet exercised on Windows at all — worth a dedicated smoke test there.
 2. **Auto-updater (§9a) verified on Mac, not on Windows.** Real update cycles have run on Mac since 0.6.0 to 0.7.0 (2026-10-29) through 0.10.x. Windows has not run an update cycle yet (backlog TD-6; two Windows teammates were asked to test on 2026-11-01).
 3. Full-rewalk-on-any-change indexing (§3): measured 594 ms for 218 docs; incremental indexing deliberately not built.

@@ -223,7 +223,8 @@ body {
   cursor: pointer;
 }
 
-.result:hover {
+.result:hover,
+.result.selected {
   background: #eef2ff;
 }
 
@@ -917,7 +918,8 @@ button:hover {
   .result {
     border-color: #333;
   }
-  .result:hover {
+  .result:hover,
+  .result.selected {
     background: #2a2f45;
   }
   .result-snippet {

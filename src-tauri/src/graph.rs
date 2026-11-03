@@ -118,7 +118,7 @@ pub fn backlinks(vault_path: &Path, stem: &str) -> Vec<Backlink> {
         .filter(|(id, (_, text))| !id.eq_ignore_ascii_case(stem) && wikilink_targets(text).iter().any(|t| t.eq_ignore_ascii_case(stem)))
         .map(|(id, (path, text))| Backlink { title: crate::frontmatter::parse(&text, &id).title, path })
         .collect();
-    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out.sort_by_key(|a| a.title.to_lowercase());
     out
 }
 

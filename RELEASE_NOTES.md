@@ -1,1 +1,1 @@
-Fixes the Refresh button on the "skill plugins are behind" banner, which kept showing the old count after you had updated.
+New: use the arrow keys and Enter to move through and open search results (Esc clears the box), skills changed since your last visit now show a "New" badge, and you can install an app update straight from Settings after "Check for updates".

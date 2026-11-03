@@ -1469,9 +1469,10 @@ function renderSkillRows(rows, showMoreBtn = false) {
   for (const skill of rows) {
     const li = document.createElement("li");
     li.className = "skill-row";
+    const isNew = sinceSeen && skill.modified_ms > new Date(sinceSeen).getTime();
     li.innerHTML = `
       <div class="skill-row-head">
-        <span class="skill-name">${escapeHtml(skill.name)}</span>
+        <span class="skill-name">${escapeHtml(skill.name)}${isNew ? '<span class="badge-new">New</span>' : ""}</span>
         <button class="skill-run-btn" data-skill="${escapeHtml(skill.name)}">Run</button>
       </div>
       <span class="skill-plugin">${escapeHtml(skill.plugin)}</span>
@@ -1602,6 +1603,7 @@ async function runSearch() {
       <div class="result-snippet">${r.snippet || ""}</div>
       <div class="result-meta">${escapeHtml(formatUpdated(r.updated))}</div>
     `;
+    li.dataset.path = r.path;
     li.addEventListener("dblclick", () => openInViewer(r.path));
     resultsEl.appendChild(li);
   }
@@ -1766,12 +1768,14 @@ document.querySelector("#update-banner-btn").addEventListener("click", () => {
 
 const appUpdateBanner = document.querySelector("#app-update-banner");
 const appUpdateBtn = document.querySelector("#app-update-btn");
+const settingsUpdateBtn = document.querySelector("#settings-update-btn");
+const updateBtns = [appUpdateBtn, settingsUpdateBtn]; // Search banner + Settings Version row
 const appUpdateText = document.querySelector("#app-update-banner .update-banner-text");
 let pendingUpdate = null;
 
 // `manual` is the Settings button: it reports the outcome; background checks stay quiet.
 async function checkForAppUpdate({ manual = false } = {}) {
-  if (pendingUpdate) return manual && toast(`Version ${pendingUpdate.version} is ready — use "Update & Restart" on the Search tab.`);
+  if (pendingUpdate) return manual && toast(`Version ${pendingUpdate.version} is ready — use "Update & Restart".`);
   try {
     pendingUpdate = await checkForUpdate();
   } catch (e) {
@@ -1782,24 +1786,25 @@ async function checkForAppUpdate({ manual = false } = {}) {
   if (pendingUpdate) {
     appUpdateText.textContent = `⬇ Second Brain Hub ${pendingUpdate.version} is available.${pendingUpdate.body ? ` ${pendingUpdate.body}` : ""}`;
     appUpdateBanner.classList.remove("hidden");
-    if (manual) toast(`Version ${pendingUpdate.version} is available — use "Update & Restart" on the Search tab.`);
+    settingsUpdateBtn.classList.remove("hidden");
+    if (manual) toast(`Version ${pendingUpdate.version} is available — use "Update & Restart".`);
   } else if (manual) toast("You're on the latest version.");
 }
 document.querySelector("#check-update-btn").addEventListener("click", () => checkForAppUpdate({ manual: true }));
 
-appUpdateBtn.addEventListener("click", async () => {
+async function installUpdate() {
   if (!pendingUpdate || appUpdateBtn.disabled) return;
-  appUpdateBtn.disabled = true;
-  appUpdateBtn.textContent = "Installing…";
+  const setBtns = (disabled, text) => updateBtns.forEach((b) => { b.disabled = disabled; b.textContent = text; });
+  setBtns(true, "Installing…");
   try {
     await pendingUpdate.downloadAndInstall();
     await relaunch();
   } catch (e) {
-    appUpdateBtn.disabled = false;
-    appUpdateBtn.textContent = "Update & Restart";
+    setBtns(false, "Update & Restart");
     alert(`Couldn't install the update:\n${e}`);
   }
-});
+}
+updateBtns.forEach((b) => b.addEventListener("click", installUpdate));
 
 // No `folder=` param, deliberately — Claude Desktop treats a link-supplied
 // folder as untrusted and re-prompts "Trust this workspace?" every time.
@@ -1887,6 +1892,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   familySelect.addEventListener("change", runSearch);
+  // Keyboard: ↑/↓ move through results, Enter opens the highlighted one, Esc clears the box.
+  searchInput.addEventListener("keydown", (e) => {
+    const rows = [...resultsEl.querySelectorAll(".result")];
+    const cur = rows.findIndex((r) => r.classList.contains("selected"));
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (!rows.length) return;
+      e.preventDefault();
+      const next = e.key === "ArrowDown" ? Math.min(cur + 1, rows.length - 1) : Math.max(cur - 1, 0);
+      rows[cur]?.classList.remove("selected");
+      rows[next].classList.add("selected");
+      rows[next].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && cur >= 0) {
+      openInViewer(rows[cur].dataset.path);
+    } else if (e.key === "Escape" && searchInput.value) {
+      searchInput.value = "";
+      runSearch();
+    }
+  });
   searchInput.addEventListener("input", () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(runSearch, 200);
