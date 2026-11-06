@@ -139,8 +139,10 @@
               <span class="setting-label">Version</span>
               <span class="setting-value" id="app-version-value">—</span>
             </div>
-            <button id="check-update-btn" class="topbar-btn">Check for updates</button>
-            <button id="settings-update-btn" class="topbar-btn hidden">Update &amp; Restart</button>
+            <div class="setting-row-actions">
+              <button id="check-update-btn" class="topbar-btn">Check for updates</button>
+              <button id="settings-update-btn" class="topbar-btn hidden">Update &amp; Restart</button>
+            </div>
           </li>
         </ul>
         <p id="onboarding-error" class="error"></p>
@@ -164,6 +166,7 @@
             <div class="search-inputs">
               <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
               <select id="family-filter" class="hidden" title="Limit to one wiki family (a hub and its child wikis)"></select>
+              <label class="stale-toggle" title="Only wikis not updated in 90+ days"><input id="stale-filter" type="checkbox" /> Stale</label>
             </div>
             <p class="hint muted">Double-click a result to open the file.</p>
           </div>

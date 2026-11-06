@@ -2,6 +2,11 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.15.2
+- **Stale wikis (F-8):** results get a grey "Stale" badge when `updated` is over 90 days old (`isStale`, `STALE_DAYS` in `main.js`); a "Stale" checkbox beside the family filter limits the list to them, oldest first (empty search: all of `recent_wikis` filtered client-side; with a query: the results filtered). Frontend only; the index already stores `updated`.
+- **Settings Version row:** "Check for updates" and "Update & Restart" now share a `setting-row-actions` wrapper so the first no longer drifts to the middle when the second appears.
+- Not verified live: stale badge/filter against the real vault, the button alignment. Wikis with no `updated` are never marked stale.
+
 ## 0.15.1
 - **Weekly transcript counts for the time-savings dashboard:** `audit::bump` increments local counters (`converted`, `reviewed`, `hidden`, `moved`, `added_to_raw`, `voc_handoff`) in `weekly-counts.json` at the matching commands in `lib.rs` (manual actions only); `Audit::rollup` queues one `weekly_counts` event per completed week into the existing pending/flush path on each scan. Why: the usage hook cannot see the Hub, so savings from transcript work were unmeasured. `transcripts::date_from_days` extracted from `today_utc` for the Monday math. Counts only, no titles, names or paths.
 - Not verified live: a real scan writing the counter file and a second-week rollup reaching the shared drive; Windows untested. Unit test covers rollup-once and current-week hold.

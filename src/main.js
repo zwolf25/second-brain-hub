@@ -1643,6 +1643,9 @@ function renderStatus(status) {
 const sinceSeen = localStorage.getItem("lastSeenAt");
 localStorage.setItem("lastSeenAt", new Date().toISOString());
 const familySelect = document.querySelector("#family-filter");
+const staleBox = document.querySelector("#stale-filter");
+const STALE_DAYS = 90;
+const isStale = (updated) => !!updated && Date.now() - new Date(updated.length > 10 ? updated : `${updated}T00:00:00`).getTime() > STALE_DAYS * 864e5;
 
 async function loadFamilies() {
   const families = await invoke("get_families");
@@ -1665,6 +1668,11 @@ async function runSearch() {
   let newCount = 0;
   if (query) {
     results = await invoke("search_vault", { query, family });
+    if (staleBox.checked) results = results.filter((r) => isStale(r.updated));
+  } else if (staleBox.checked) {
+    // Stale wikis are the oldest, so pull the whole list and show them oldest first.
+    const all = await invoke("recent_wikis", { since: null, family, limit: 100000 });
+    results = all.items.filter((r) => isStale(r.updated)).reverse();
   } else {
     ({ items: results, new_count: newCount } = await invoke("recent_wikis", { since: sinceSeen, family, limit: showAllRecent ? 1000 : 5 }));
   }
@@ -1675,7 +1683,9 @@ async function runSearch() {
     const h = document.createElement("li");
     h.className = "results-heading";
     // The list is capped at 5 unless expanded, so say how many of the changed wikis it shows.
-    h.textContent = !newCount
+    h.textContent = staleBox.checked
+      ? `Not updated in ${STALE_DAYS}+ days · ${results.length}`
+      : !newCount
       ? "Recently updated"
       : results.length < newCount
         ? `Recently updated · showing ${results.length} of ${newCount} changed since your last visit`
@@ -1687,7 +1697,7 @@ async function runSearch() {
     li.className = "result";
     const isNew = !query && sinceSeen && r.updated && r.updated > sinceSeen;
     li.innerHTML = `
-      <div class="result-title">${escapeHtml(r.title)}${isNew ? '<span class="badge-new">New</span>' : ""}</div>
+      <div class="result-title">${escapeHtml(r.title)}${isNew ? '<span class="badge-new">New</span>' : ""}${isStale(r.updated) ? '<span class="badge-stale">Stale</span>' : ""}</div>
       <div class="result-snippet">${r.snippet || ""}</div>
       <div class="result-meta">${escapeHtml(formatUpdated(r.updated))}</div>
     `;
@@ -1695,7 +1705,7 @@ async function runSearch() {
     li.addEventListener("dblclick", () => openInViewer(r.path));
     resultsEl.appendChild(li);
   }
-  if (!query && (showAllRecent || newCount > results.length)) {
+  if (!query && !staleBox.checked && (showAllRecent || newCount > results.length)) {
     const more = document.createElement("li");
     more.className = "results-more";
     more.textContent = showAllRecent ? "Show fewer" : `Show all ${newCount}`;
@@ -1980,6 +1990,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   familySelect.addEventListener("change", runSearch);
+  staleBox.addEventListener("change", runSearch);
   // Keyboard: ↑/↓ move through results, Enter opens the highlighted one, Esc clears the box.
   searchInput.addEventListener("keydown", (e) => {
     const rows = [...resultsEl.querySelectorAll(".result")];

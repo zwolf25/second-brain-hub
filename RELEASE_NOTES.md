@@ -1,1 +1,1 @@
-The Hub now keeps a private weekly count of the transcript actions you take (converted, re-categorized, hidden, moved, added to notes) and shares only those counts, never titles or names, so the team can measure time saved.
+Wikis not updated in 90+ days now show a grey "Stale" badge, and a new "Stale" checkbox next to the search box lists only those. The Settings "Check for updates" button also stays next to "Update & Restart".

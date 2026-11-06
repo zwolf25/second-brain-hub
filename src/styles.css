@@ -96,6 +96,26 @@ body {
   vertical-align: middle;
 }
 
+.badge-stale {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 0.5em;
+  border-radius: 999px;
+  background: #8a8f98;
+  color: #fff;
+  font-size: 0.7em;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.stale-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 .viewer-content a.wikilink {
   cursor: pointer;
 }
