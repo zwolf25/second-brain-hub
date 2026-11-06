@@ -179,6 +179,57 @@ impl Audit {
     }
 }
 
+/// Monday (ISO date) of the week containing `date`.
+fn week_start(date: &str) -> String {
+    let d = days_since_epoch(date) as i64;
+    crate::transcripts::date_from_days(d - (d + 3) % 7) // 1970-01-01 was a Thursday
+}
+
+/// Counts one Hub action in the local weekly counters (`weekly-counts.json` in the Hub data dir). Counts only, no content.
+pub fn bump(dir: &Path, field: &str, n: usize) {
+    if n == 0 {
+        return;
+    }
+    let path = dir.join("weekly-counts.json");
+    let mut st: serde_json::Value = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| serde_json::json!({}));
+    let week = week_start(&crate::transcripts::today_utc());
+    let slot = &mut st["weeks"][week.as_str()][field];
+    *slot = (slot.as_u64().unwrap_or(0) + n as u64).into();
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(&path, st.to_string());
+}
+
+impl Audit {
+    /// Queues one `weekly_counts` event for every completed week not yet sent. The usage dashboard reads these to
+    /// estimate time saved; the current week is held back so a week is never reported twice.
+    pub fn rollup(&self, dir: &Path) -> Result<usize> {
+        let path = dir.join("weekly-counts.json");
+        let Ok(raw) = std::fs::read_to_string(&path) else { return Ok(0) };
+        let mut st: serde_json::Value = serde_json::from_str(&raw)?;
+        let current = week_start(&crate::transcripts::today_utc());
+        let mut lines = Vec::new();
+        let weeks: Vec<(String, serde_json::Value)> = st["weeks"].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
+        for (week, counts) in weeks.into_iter().filter(|(w, _)| w.as_str() < current.as_str()) {
+            let mut ev = serde_json::json!({"ts": now_iso(), "user": self.slug, "hub_version": self.hub_version, "event": "weekly_counts", "week": week});
+            ev.as_object_mut().unwrap().extend(counts.as_object().cloned().unwrap_or_default());
+            lines.push(serde_json::to_string(&ev)?);
+            st["weeks"].as_object_mut().unwrap().remove(&week);
+        }
+        if lines.is_empty() {
+            return Ok(0);
+        }
+        if let Some(d) = self.pending.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&self.pending)?;
+        for l in &lines {
+            writeln!(f, "{l}")?;
+        }
+        std::fs::write(&path, st.to_string())?;
+        Ok(lines.len())
+    }
+}
+
 pub fn disabled_status() -> Status {
     Status { enabled: false, user: None, pending: 0, stuck_days: 0, events_file: None }
 }
@@ -256,6 +307,26 @@ mod tests {
         let hb: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(sb.join("transcript-audit/heartbeat/zac-wolf.json")).unwrap()).unwrap();
         assert!(hb["last_log_write"].is_string(), "last write survives an idle scan");
         assert_eq!(hb["pending_flush"], 0);
+    }
+
+    #[test]
+    fn weekly_counts_roll_up_once_and_hold_the_current_week() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("sb")).unwrap();
+        let a = audit(tmp.path());
+        let data = tmp.path().join("data");
+        bump(&data, "converted", 3);
+        assert_eq!(a.rollup(&data).unwrap(), 0, "current week is held back");
+        let old = week_start("2020-01-08");
+        assert_eq!(old, "2020-01-06");
+        std::fs::write(data.join("weekly-counts.json"), format!(r#"{{"weeks":{{"{old}":{{"converted":4,"reviewed":1}}}}}}"#)).unwrap();
+        assert_eq!(a.rollup(&data).unwrap(), 1);
+        assert_eq!(a.rollup(&data).unwrap(), 0, "a week is sent once");
+        a.flush().unwrap();
+        let body = std::fs::read_to_string(a.events_file()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        assert_eq!((v["event"].as_str(), v["converted"].as_u64(), v["week"].as_str()), (Some("weekly_counts"), Some(4), Some("2020-01-06")));
+        assert!(!body.contains("title"), "counts only");
     }
 
     #[test]

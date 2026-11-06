@@ -2,6 +2,10 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.15.1
+- **Weekly transcript counts for the time-savings dashboard:** `audit::bump` increments local counters (`converted`, `reviewed`, `hidden`, `moved`, `added_to_raw`, `voc_handoff`) in `weekly-counts.json` at the matching commands in `lib.rs` (manual actions only); `Audit::rollup` queues one `weekly_counts` event per completed week into the existing pending/flush path on each scan. Why: the usage hook cannot see the Hub, so savings from transcript work were unmeasured. `transcripts::date_from_days` extracted from `today_utc` for the Monday math. Counts only, no titles, names or paths.
+- Not verified live: a real scan writing the counter file and a second-week rollup reaching the shared drive; Windows untested. Unit test covers rollup-once and current-week hold.
+
 ## 0.15.0
 - **Link health tab on the Map page (F-11):** `graph::link_health` (command `get_link_health`) lists dead `[[wikilinks]]` and orphan pages. A link is dead when no page has that stem, exact or case-insensitive (same rule as the viewer's `resolve`); links inside fenced or inline code are ignored (`strip_code`), self-links are not inbound. Each dead target carries a "did you mean" (`suggest`: name containment or small edit distance, no new crate); an orphan lists up to 3 pages it links to. UI: Graph | Link health toggle in the Map header with a count badge; each row has Open plus "✦ Fix with Claude" (`launchClaudeCommand` with a prompt scoped to that page), or "✦ Suggest fix" with a `/submit-suggestion` prompt when `can_edit_markdown` says the page is view-only. Back from the viewer returns to the tab you left (`mapTab`). 1 new test. Checked against the real shared vault: 0 broken links, 7 orphans (so the broken-link rows are only exercised by the unit test). Not verified live; Windows untested.
 

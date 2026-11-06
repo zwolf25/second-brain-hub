@@ -1,1 +1,1 @@
-The Map page has a new "Link health" tab that lists broken [[wikilinks]] and pages nothing links to, each with an Open button and a "Fix with Claude" button that starts a Claude session about just that page.
+The Hub now keeps a private weekly count of the transcript actions you take (converted, re-categorized, hidden, moved, added to notes) and shares only those counts, never titles or names, so the team can measure time saved.

@@ -397,7 +397,10 @@ fn save_state(out: &Path, state: &State) -> Result<()> {
 }
 
 pub fn today_utc() -> String {
-    let days = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86400) as i64;
+    date_from_days(std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86400) as i64)
+}
+
+pub fn date_from_days(days: i64) -> String {
     // Howard Hinnant's civil_from_days.
     let z = days + 719468;
     let era = z.div_euclid(146097);

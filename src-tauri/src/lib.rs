@@ -277,7 +277,11 @@ fn scan_transcripts(app: &AppHandle) {
     match transcripts::scan(&src, &state.transcripts_dir, &rules) {
         Ok(r) => {
             tracing::info!("transcripts scan: {r:?}");
+            audit::bump(&state.transcripts_dir, "converted", r.converted);
             if let Some(a) = audit_for(app, rules.version) {
+                if let Err(e) = a.rollup(&state.transcripts_dir) {
+                    tracing::warn!("weekly counts rollup failed: {e:#}");
+                }
                 let events: Vec<_> = r.auto_other.iter().map(|e| a.event("auto_other", e, None, None, None)).collect();
                 let wrote = match a.queue(&events).and_then(|_| a.flush()) {
                     Ok(n) => n > 0,
@@ -561,6 +565,7 @@ fn set_transcript_category(app: AppHandle, state: State<Arc<AppState>>, vtts: Ve
     }
     let _guard = state.transcripts_scan.lock_recover();
     let changes = transcripts::set_category(&state.transcripts_dir, &vtts, &category).map_err(|e| e.to_string())?;
+    audit::bump(&state.transcripts_dir, "reviewed", changes.iter().filter(|c| c.from != category).count());
     if let Some(a) = audit_for(&app, rules.version) {
         let events: Vec<_> = changes
             .iter()
@@ -585,7 +590,11 @@ fn get_audit_status(app: AppHandle) -> audit::Status {
 #[tauri::command]
 fn set_transcripts_hidden(state: State<Arc<AppState>>, vtts: Vec<String>, hidden: bool) -> Result<(), String> {
     let _guard = state.transcripts_scan.lock_recover();
-    transcripts::set_hidden(&state.transcripts_dir, &vtts, hidden).map_err(|e| e.to_string())
+    transcripts::set_hidden(&state.transcripts_dir, &vtts, hidden).map_err(|e| e.to_string())?;
+    if hidden {
+        audit::bump(&state.transcripts_dir, "hidden", vtts.len());
+    }
+    Ok(())
 }
 
 /// "Add to Second Brain": writes a raw-note stub per transcript and hides it. Returns (written, skipped).
@@ -593,7 +602,9 @@ fn set_transcripts_hidden(state: State<Arc<AppState>>, vtts: Vec<String>, hidden
 fn add_transcripts_to_raw(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(usize, usize), String> {
     let raw = state.config.lock_recover().raw_path.clone().ok_or("Choose your raw folder in Settings first.")?;
     let _guard = state.transcripts_scan.lock_recover();
-    transcripts::add_to_raw(&state.transcripts_dir, &raw, &vtts).map_err(|e| format!("{e:#}"))
+    let r = transcripts::add_to_raw(&state.transcripts_dir, &raw, &vtts).map_err(|e| format!("{e:#}"))?;
+    audit::bump(&state.transcripts_dir, "added_to_raw", r.0);
+    Ok(r)
 }
 
 /// Transcripts an enabled VoC rule has flagged, for the "ready for VoC" button.
@@ -629,7 +640,9 @@ fn get_voc_category(state: State<Arc<AppState>>) -> String {
 #[tauri::command]
 fn mark_transcripts_voc(state: State<Arc<AppState>>, vtts: Vec<String>) -> Result<(), String> {
     let _guard = state.transcripts_scan.lock_recover();
-    transcripts::mark_voc(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())
+    transcripts::mark_voc(&state.transcripts_dir, &vtts).map_err(|e| e.to_string())?;
+    audit::bump(&state.transcripts_dir, "voc_handoff", vtts.len());
+    Ok(())
 }
 
 #[tauri::command]
@@ -647,7 +660,9 @@ fn undo_move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>) -> Resu
 #[tauri::command]
 fn move_transcripts(state: State<Arc<AppState>>, vtts: Vec<String>, dest: String) -> Result<transcripts::MoveReport, String> {
     let _guard = state.transcripts_scan.lock_recover();
-    transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))
+    let r = transcripts::move_selected(&state.transcripts_dir, &vtts, std::path::Path::new(&dest)).map_err(|e| format!("{e:#}"))?;
+    audit::bump(&state.transcripts_dir, "moved", r.moved);
+    Ok(r)
 }
 
 /// Saves the whole ordered rule list and applies it once right away.
