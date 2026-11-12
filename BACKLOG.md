@@ -12,8 +12,6 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 
 | # | ID | Type | Item | V | E | Score | Why / evidence |
 |---|----|------|------|---|---|-------|----------------|
-| 2 | TD-14 | Debt (new) | **Make the frontend testable.** `main.js` is checked only by `node --check`; the Move bug (0.8.2) lived in that gap. Pull pure logic (`fuzzyScore`, `escapeHtml`, auto-rule matching, date formatting) into a module and add `node --test` to CI. Do it with TD-7, not before. | 3 | 3 | 9 | 1,917 lines, zero automated tests; `SMOKE-CHECKLIST.md` is manual. |
-| 3 | F-12 | Feature (new) | **Result filters and sort:** filter by frontmatter `type` and `topics`, sort by updated date. Data is indexed; family filter (0.11.0) is the pattern. | 3 | 3 | 9 | Useful once the vault passes ~300 pages. |
 | 4 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5). Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. Two teammates were asked on 2026-11-01. |
 | 5 | F-13 | Feature (new) | **Vault health page (owner-facing):** read `_status/pipelines.json` and the queue folders to show pipeline freshness and queue backlogs. Zero tokens. | 2 | 2 | 8 | Same data `sb_inventory.py` prints; the dashboard doctor covers Zac's machine, not the shared view. |
 | 6 | TD-7 | Debt | **Split the big files.** `main.js` is 1,917 lines (one scope, all pages), `transcripts.rs` 1,773, and `lib.rs` 1,099 with ~60 commands in one file. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. Counts re-measured 2026-11-02 (were 1,673 / 1,642). |
@@ -56,3 +54,5 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | F-11 | Map page "Link health" tab: dead wikilinks (with did-you-mean) and orphans, per-row Open + scoped "Fix with Claude" / "Suggest fix" (view-only pages route to `submit-suggestion`). Real shared vault: 0 broken, 7 orphans. | 0.15.0 |
 | F-15 | "New" badge on Skills rows changed since the previous launch (file mtime via `SkillInfo.modified_ms`). | 0.14.0 |
 | F-8 | Staleness marker and "Stale" filter (90+ days) | 0.15.2 |
+| TD-14 | Testable frontend: pure helpers in `src/lib.js`, 7 `node --test` tests, run in `test.yml`. Auto-rule matching stays in Rust (not extracted). | 0.16.0 |
+| F-12 | Result filters and sort in a Filter drawer (wiki family, topic, sort, stale; Apply with live count; chips). Type filter dropped: 252/253 pages are `type: wiki`. | 0.16.0 |

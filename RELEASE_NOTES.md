@@ -1,1 +1,1 @@
-Wikis not updated in 90+ days now show a grey "Stale" badge, and a new "Stale" checkbox next to the search box lists only those. The Settings "Check for updates" button also stays next to "Update & Restart".
+Search filters now live in a Filter button that opens a side panel: pick a wiki family, topic, sort order or stale-only, then Apply. Active filters show as chips you can click to remove.

@@ -165,11 +165,40 @@
           <div class="search-row">
             <div class="search-inputs">
               <input id="search-input" type="text" placeholder="Search the wiki (typo-tolerant, try a few keywords)…" autofocus />
-              <select id="family-filter" class="hidden" title="Limit to one wiki family (a hub and its child wikis)"></select>
-              <label class="stale-toggle" title="Only wikis not updated in 90+ days"><input id="stale-filter" type="checkbox" /> Stale</label>
+              <button id="filter-btn" class="topbar-btn" type="button" aria-haspopup="dialog" title="Filter and sort results">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
+                Filter <span id="filter-count" class="filter-count hidden"></span>
+              </button>
             </div>
+            <div id="filter-chips" class="filter-chips hidden"></div>
             <p class="hint muted">Double-click a result to open the file.</p>
           </div>
+          <div id="filter-scrim" class="filter-scrim hidden"></div>
+          <aside id="filter-drawer" class="filter-drawer hidden" role="dialog" aria-label="Filters">
+            <div class="filter-head">
+              <strong>Filters</strong>
+              <button id="filter-close" class="filter-x" type="button" aria-label="Close filters">×</button>
+            </div>
+            <div class="filter-body">
+              <label id="family-field" class="filter-field hidden">Wiki family
+                <select id="family-filter" title="A hub and its child wikis"></select>
+              </label>
+              <label class="filter-field">Topic
+                <select id="topic-filter"></select>
+              </label>
+              <fieldset class="filter-field filter-sort">
+                <legend>Sort</legend>
+                <label><input type="radio" name="sort" value="relevance" checked /> Relevance</label>
+                <label><input type="radio" name="sort" value="newest" /> Newest</label>
+                <label><input type="radio" name="sort" value="oldest" /> Oldest</label>
+              </fieldset>
+              <label class="stale-toggle" title="Only wikis not updated in 90+ days"><input id="stale-filter" type="checkbox" /> Stale only (90+ days)</label>
+            </div>
+            <div class="filter-foot">
+              <button id="filter-reset" class="topbar-btn" type="button">Reset</button>
+              <button id="filter-apply" class="topbar-btn filter-apply" type="button">Apply</button>
+            </div>
+          </aside>
           <ul id="results" class="results"></ul>
           <p id="empty-state" class="muted"></p>
         </div>

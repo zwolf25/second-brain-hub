@@ -2,6 +2,12 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.16.0
+- **Filter drawer (F-12):** the family dropdown and Stale checkbox left the search row. One "Filter" button (count badge) opens a right-hand drawer with Wiki family, Topic, Sort (Relevance/Newest/Oldest) and Stale only. The drawer controls are a draft; Apply copies them into `applied`, closes it and calls `runSearch`. "Apply · N results" updates live (`refreshDraft` -> `fetchResults(query, draft, true)`); with no query and no filters it shows plain "Apply" because that view is the 5-row preview. Active filters show as chips under the search box (click × to drop one). Esc, the × button or the scrim closes it and discards the draft. Topic options are rebuilt from the pages that match the other settings, so only topics that return something are offered.
+- **Rust:** `index::Fields.topic_list` (stored, topics joined by `\n`) and `SearchResult.topics: Vec<String>` expose each page's topics; the index is rebuilt every launch so the schema change needs no migration. A `type` filter was built and dropped: 252 of 253 vault pages are `type: wiki`.
+- **Testable frontend (TD-14):** `fuzzyScore`, `escapeHtml` (now string-based, no DOM), `formatUpdated`, `isStale` and the new `topicValues`/`filterByTopic`/`sortResults` moved to `src/lib.js`; `src/lib.test.js` has 7 `node --test` tests and `test.yml` runs them. Auto-rule matching was not extracted: it lives in Rust.
+- Not verified: the drawer in the real app (Zac clicked through the earlier inline-select version only), dark mode, Windows. With a search term the live count tops out at 30 (the search cap). The Topic list overlaps the family filter (hub pages are the top topics).
+
 ## 0.15.2
 - **Stale wikis (F-8):** results get a grey "Stale" badge when `updated` is over 90 days old (`isStale`, `STALE_DAYS` in `main.js`); a "Stale" checkbox beside the family filter limits the list to them, oldest first (empty search: all of `recent_wikis` filtered client-side; with a query: the results filtered). Frontend only; the index already stores `updated`.
 - **Settings Version row:** "Check for updates" and "Update & Restart" now share a `setting-row-actions` wrapper so the first no longer drifts to the middle when the second appears.

@@ -1,3 +1,5 @@
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults } from "./lib.js";
+
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open: openDialog, confirm: confirmDialog, message: messageDialog } = window.__TAURI__.dialog;
@@ -1529,25 +1531,6 @@ const skillsUpdateBannerCount = document.querySelector("#update-banner-count");
 const SKILLS_RECENT_COUNT = 8;
 let allSkills = [];
 
-// Subsequence match: every query char appears in order in the candidate
-// text; score = matched span length (lower = tighter match). No library
-// needed for ~150 short strings.
-function fuzzyScore(query, text) {
-  query = query.toLowerCase();
-  text = text.toLowerCase();
-  let cursor = 0,
-    first = -1,
-    last = -1;
-  for (const ch of query) {
-    const idx = text.indexOf(ch, cursor);
-    if (idx === -1) return null;
-    if (first === -1) first = idx;
-    last = idx;
-    cursor = idx + 1;
-  }
-  return last - first;
-}
-
 function renderSkillRows(rows, showMoreBtn = false) {
   skillsList.innerHTML = "";
   if (rows.length === 0) {
@@ -1644,12 +1627,24 @@ const sinceSeen = localStorage.getItem("lastSeenAt");
 localStorage.setItem("lastSeenAt", new Date().toISOString());
 const familySelect = document.querySelector("#family-filter");
 const staleBox = document.querySelector("#stale-filter");
-const STALE_DAYS = 90;
-const isStale = (updated) => !!updated && Date.now() - new Date(updated.length > 10 ? updated : `${updated}T00:00:00`).getTime() > STALE_DAYS * 864e5;
+const topicSelect = document.querySelector("#topic-filter");
+const filterBtn = document.querySelector("#filter-btn");
+const filterCount = document.querySelector("#filter-count");
+const filterChips = document.querySelector("#filter-chips");
+const filterDrawer = document.querySelector("#filter-drawer");
+const filterScrim = document.querySelector("#filter-scrim");
+const filterApply = document.querySelector("#filter-apply");
+const sortRadio = (v) => document.querySelector(`input[name="sort"][value="${v}"]`);
+const readSort = () => document.querySelector('input[name="sort"]:checked').value;
+
+// What the results actually use. The drawer controls are a draft until Apply copies them here.
+const DEFAULT_FILTERS = { family: "", topic: "", sort: "relevance", stale: false };
+let applied = { ...DEFAULT_FILTERS };
+const readDraft = () => ({ family: familySelect.value, topic: topicSelect.value, sort: readSort(), stale: staleBox.checked });
+const isNarrowing = (f) => !!(f.topic || f.stale || f.sort !== "relevance");
 
 async function loadFamilies() {
   const families = await invoke("get_families");
-  const current = familySelect.value;
   familySelect.innerHTML = '<option value="">All wikis</option>';
   for (const f of families) {
     const opt = document.createElement("option");
@@ -1657,34 +1652,110 @@ async function loadFamilies() {
     opt.textContent = `${f.hub} (+${f.children})`;
     familySelect.appendChild(opt);
   }
-  familySelect.value = families.some((f) => f.hub === current) ? current : "";
-  familySelect.classList.toggle("hidden", families.length === 0);
+  if (!families.some((f) => f.hub === applied.family)) applied.family = "";
+  familySelect.value = applied.family;
+  document.querySelector("#family-field").classList.toggle("hidden", families.length === 0);
+  renderFilterChips();
 }
 
-async function runSearch() {
-  const query = searchInput.value.trim();
-  const family = familySelect.value || null;
+// Fetch, narrow and order results for a filter set. `full` pulls the whole list (the drawer needs every topic and a true count);
+// otherwise the empty search page shows only the 5-row "recently updated" preview.
+async function fetchResults(query, f, full = false) {
+  const family = f.family || null;
   let results;
   let newCount = 0;
   if (query) {
     results = await invoke("search_vault", { query, family });
-    if (staleBox.checked) results = results.filter((r) => isStale(r.updated));
-  } else if (staleBox.checked) {
-    // Stale wikis are the oldest, so pull the whole list and show them oldest first.
+  } else if (full || isNarrowing(f)) {
+    // Stale wikis are the oldest, so show them oldest first.
     const all = await invoke("recent_wikis", { since: null, family, limit: 100000 });
-    results = all.items.filter((r) => isStale(r.updated)).reverse();
+    results = f.stale ? all.items.reverse() : all.items;
   } else {
     ({ items: results, new_count: newCount } = await invoke("recent_wikis", { since: sinceSeen, family, limit: showAllRecent ? 1000 : 5 }));
   }
+  if (f.stale) results = results.filter((r) => isStale(r.updated));
+  const topics = topicValues(results); // offered before the topic pick narrows the set
+  return { results: sortResults(filterByTopic(results, f.topic), f.sort), newCount, topics };
+}
+
+// Chips under the search box + count badge on the Filter button: one chip per applied filter, click to drop it.
+function renderFilterChips() {
+  const chips = [
+    applied.family && ["family", `Wiki: ${applied.family}`],
+    applied.topic && ["topic", `Topic: ${applied.topic}`],
+    applied.sort !== "relevance" && ["sort", `Sort: ${applied.sort === "newest" ? "Newest" : "Oldest"}`],
+    applied.stale && ["stale", `Stale ${STALE_DAYS}+ days`],
+  ].filter(Boolean);
+  filterChips.innerHTML = "";
+  for (const [key, label] of chips) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "filter-chip";
+    b.textContent = `${label} ×`;
+    b.setAttribute("aria-label", `Remove filter ${label}`);
+    b.addEventListener("click", () => {
+      applied = { ...applied, [key]: DEFAULT_FILTERS[key] };
+      renderFilterChips();
+      runSearch();
+    });
+    filterChips.appendChild(b);
+  }
+  filterChips.classList.toggle("hidden", chips.length === 0);
+  filterCount.textContent = chips.length;
+  filterCount.classList.toggle("hidden", chips.length === 0);
+}
+
+// Draft changed in the drawer: refresh the topic list and the live count on Apply.
+let draftSeq = 0;
+async function refreshDraft(draft = readDraft()) {
+  const seq = ++draftSeq;
+  const query = searchInput.value.trim();
+  const { results, topics } = await fetchResults(query, draft, true);
+  if (seq !== draftSeq) return; // a newer change superseded this one
+  topicSelect.innerHTML = "";
+  topicSelect.append(new Option("All topics", ""), ...topics.map((t) => new Option(t, t)));
+  const eff = { ...draft, topic: topics.includes(draft.topic) ? draft.topic : "" };
+  topicSelect.value = eff.topic;
+  // A bare draft with no query shows the 5-row preview, so a count would mislead.
+  filterApply.textContent = query || isNarrowing(eff) ? `Apply · ${results.length} result${results.length === 1 ? "" : "s"}` : "Apply";
+}
+
+function setDraft(f) {
+  familySelect.value = f.family;
+  topicSelect.value = f.topic; // no-op unless that option exists; refreshDraft rebuilds the options
+  sortRadio(f.sort).checked = true;
+  staleBox.checked = f.stale;
+}
+
+function openFilters() {
+  setDraft(applied);
+  filterDrawer.classList.remove("hidden");
+  filterScrim.classList.remove("hidden");
+  document.querySelector("#filter-close").focus();
+  refreshDraft(applied);
+}
+
+function closeFilters() {
+  filterDrawer.classList.add("hidden");
+  filterScrim.classList.add("hidden");
+  filterBtn.focus();
+}
+
+async function runSearch() {
+  const query = searchInput.value.trim();
+  const narrowing = isNarrowing(applied);
+  const { results, newCount } = await fetchResults(query, applied);
   if (searchInput.value.trim() !== query) return; // stale: user kept typing
   resultsEl.innerHTML = "";
-  emptyStateEl.textContent = query && results.length === 0 ? "No matches." : "";
+  emptyStateEl.textContent = (query || narrowing) && results.length === 0 ? "No matches." : "";
   if (!query && results.length) {
     const h = document.createElement("li");
     h.className = "results-heading";
     // The list is capped at 5 unless expanded, so say how many of the changed wikis it shows.
-    h.textContent = staleBox.checked
+    h.textContent = applied.stale
       ? `Not updated in ${STALE_DAYS}+ days · ${results.length}`
+      : narrowing
+      ? `All wikis · ${results.length}`
       : !newCount
       ? "Recently updated"
       : results.length < newCount
@@ -1705,7 +1776,7 @@ async function runSearch() {
     li.addEventListener("dblclick", () => openInViewer(r.path));
     resultsEl.appendChild(li);
   }
-  if (!query && !staleBox.checked && (showAllRecent || newCount > results.length)) {
+  if (!query && !narrowing && (showAllRecent || newCount > results.length)) {
     const more = document.createElement("li");
     more.className = "results-more";
     more.textContent = showAllRecent ? "Show fewer" : `Show all ${newCount}`;
@@ -1718,24 +1789,6 @@ async function runSearch() {
 }
 
 let showAllRecent = false;
-
-// "Today" / "Yesterday" / "Oct 28" / "Oct 28, 2025" from a frontmatter `updated` value.
-function formatUpdated(iso) {
-  if (!iso) return "";
-  const d = iso.length > 10 ? new Date(iso) : new Date(`${iso}T00:00:00`); // date-only = local day, not UTC
-  if (isNaN(d)) return iso;
-  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
-}
-
-function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML;
-}
 
 // --- Raw / Inbox heads-up badges (topbar, omnipresent across tabs) ---
 
@@ -1989,8 +2042,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     revealItemInDir(dir);
   });
 
-  familySelect.addEventListener("change", runSearch);
-  staleBox.addEventListener("change", runSearch);
+  filterBtn.addEventListener("click", openFilters);
+  filterScrim.addEventListener("click", closeFilters);
+  document.querySelector("#filter-close").addEventListener("click", closeFilters);
+  filterDrawer.addEventListener("keydown", (e) => e.key === "Escape" && closeFilters());
+  for (const el of [familySelect, topicSelect, staleBox, ...document.querySelectorAll('input[name="sort"]')]) el.addEventListener("change", () => refreshDraft());
+  document.querySelector("#filter-reset").addEventListener("click", () => {
+    setDraft(DEFAULT_FILTERS);
+    refreshDraft(DEFAULT_FILTERS);
+  });
+  filterApply.addEventListener("click", () => {
+    applied = readDraft();
+    renderFilterChips();
+    closeFilters();
+    runSearch();
+  });
   // Keyboard: ↑/↓ move through results, Enter opens the highlighted one, Esc clears the box.
   searchInput.addEventListener("keydown", (e) => {
     const rows = [...resultsEl.querySelectorAll(".result")];

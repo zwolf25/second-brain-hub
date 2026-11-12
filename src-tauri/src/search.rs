@@ -15,6 +15,12 @@ pub struct SearchResult {
     pub title: String,
     pub snippet: String,
     pub updated: String,
+    pub topics: Vec<String>,
+}
+
+/// Topic list for the result filter, read back from a stored doc.
+fn topics_of(doc: &TantivyDocument, fields: &Fields) -> Vec<String> {
+    doc.get_first(fields.topic_list).and_then(|v| v.as_str()).unwrap_or("").lines().map(String::from).collect()
 }
 
 const MAX_RESULTS: usize = 30;
@@ -145,11 +151,13 @@ pub fn search(index: &Index, fields: &Fields, query_text: &str, allowed: Option<
                 escape_html(&body.chars().take(220).collect::<String>())
             });
 
+        let topics = topics_of(&doc, fields);
         results.push(SearchResult {
             path: get(fields.path),
             title: get(fields.title),
             snippet,
             updated: get(fields.updated),
+            topics,
         });
         if results.len() == MAX_RESULTS {
             break;
@@ -185,7 +193,8 @@ pub fn recent(index: &Index, fields: &Fields, n: usize, since: Option<&str>, all
             .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('>'))
             .unwrap_or("");
         let snippet = escape_html(&prose.chars().take(220).collect::<String>());
-        all.push(SearchResult { path, title: get(fields.title), snippet, updated: get(fields.updated) });
+        let topics = topics_of(&doc, fields);
+        all.push(SearchResult { path, title: get(fields.title), snippet, updated: get(fields.updated), topics });
     }
     all.sort_by(|a, b| b.updated.cmp(&a.updated));
     let new_count = since.map_or(0, |s| all.iter().filter(|r| !r.updated.is_empty() && r.updated.as_str() > s).count());

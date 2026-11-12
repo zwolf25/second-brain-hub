@@ -20,5 +20,6 @@ jobs:
         with:
           node-version: 22
       - run: node --check src/main.js
+      - run: node --test src/lib.test.js
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml

@@ -12,6 +12,8 @@ pub struct Fields {
     pub body: Field,
     pub topics: Field,
     pub updated: Field,
+    /// Topics joined by '\n', stored only (the searchable form is `topics`).
+    pub topic_list: Field,
 }
 
 pub fn build_schema() -> (Schema, Fields) {
@@ -21,8 +23,9 @@ pub fn build_schema() -> (Schema, Fields) {
     let body = builder.add_text_field("body", TEXT | STORED);
     let topics = builder.add_text_field("topics", TEXT | STORED);
     let updated = builder.add_text_field("updated", STRING | STORED);
+    let topic_list = builder.add_text_field("topic_list", STORED);
     let schema = builder.build();
-    (schema, Fields { path, title, body, topics, updated })
+    (schema, Fields { path, title, body, topics, updated, topic_list })
 }
 
 /// Full rebuild: wipes and recreates the on-disk index, then walks the vault
@@ -65,6 +68,7 @@ pub fn rebuild(index_dir: &Path, vault_path: &Path) -> Result<usize> {
             fields.body => parsed.body,
             fields.topics => parsed.topics,
             fields.updated => parsed.updated,
+            fields.topic_list => parsed.topic_list.join("\n"),
         ))?;
         count += 1;
     }
@@ -111,6 +115,7 @@ mod tests {
         assert!(!results.is_empty(), "expected at least one match for 'refrigerant'");
         assert_eq!(results[0].title, "Refrigerant Tracking");
         assert!(!results[0].snippet.is_empty());
+        assert_eq!(results[0].topics, vec!["work-order-management"]);
 
         let recent = search::recent(&idx, &fields, 1, Some("2026-06-15"), None).unwrap();
         assert_eq!(recent.items.len(), 1);

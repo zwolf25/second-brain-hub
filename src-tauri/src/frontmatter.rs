@@ -12,6 +12,8 @@ pub struct ParsedDoc {
     pub title: String,
     pub body: String,
     pub topics: String,
+    /// Same topics as `topics`, one entry each (for the result filter).
+    pub topic_list: Vec<String>,
     pub updated: String,
 }
 
@@ -34,6 +36,7 @@ pub fn parse(raw: &str, filename_fallback: &str) -> ParsedDoc {
         title: strip_wikilink_brackets(&title),
         body: strip_wikilink_brackets(body),
         topics: strip_wikilink_brackets(&fm.topics.join(" ")),
+        topic_list: fm.topics.iter().map(|t| strip_wikilink_brackets(t).trim().to_string()).filter(|t| !t.is_empty()).collect(),
         updated: fm.updated,
     }
 }
