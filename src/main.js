@@ -909,6 +909,7 @@ let viewerHistory = [];
 
 // opts.keepHistory: re-render or step within the same reading session (link click, Back, Save).
 async function openInViewer(path, returnTo = "search", opts = {}) {
+  if (!opts.keepHistory && /[\\/]wikis[\\/]/.test(path)) invoke("audit_count", { field: "hub_wikis_opened" }).catch(() => {});
   viewerReturnTo = returnTo;
   if (!opts.keepHistory) viewerHistory = [];
   let doc;
@@ -1741,11 +1742,20 @@ function closeFilters() {
   filterBtn.focus();
 }
 
+// One count per search burst: 2+ characters and 30 s since the last counted one (runSearch fires on every debounced keystroke).
+let lastCountedSearch = 0;
+function countSearch(query) {
+  if (query.length < 2 || Date.now() - lastCountedSearch < 30000) return;
+  lastCountedSearch = Date.now();
+  invoke("audit_count", { field: "hub_searches" }).catch(() => {});
+}
+
 async function runSearch() {
   const query = searchInput.value.trim();
   const narrowing = isNarrowing(applied);
   const { results, newCount } = await fetchResults(query, applied);
   if (searchInput.value.trim() !== query) return; // stale: user kept typing
+  countSearch(query);
   resultsEl.innerHTML = "";
   emptyStateEl.textContent = (query || narrowing) && results.length === 0 ? "No matches." : "";
   if (!query && results.length) {

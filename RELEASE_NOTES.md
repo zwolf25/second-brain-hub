@@ -1,1 +1,1 @@
-Search filters now live in a Filter button that opens a side panel: pick a wiki family, topic, sort order or stale-only, then Apply. Active filters show as chips you can click to remove.
+The Hub now keeps anonymous weekly counts of searches and wiki opens (never what you searched for or which page) so the team can see how much time the Second Brain saves. It also sends them for people who don't use Transcripts.

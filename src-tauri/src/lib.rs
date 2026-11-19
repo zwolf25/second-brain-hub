@@ -266,6 +266,32 @@ fn audit_for(app: &AppHandle, rules_version: u32) -> Option<audit::Audit> {
     audit::Audit::new(shared_root(&state).as_deref(), slug, &state.transcripts_dir, &app.package_info().version.to_string(), rules_version)
 }
 
+/// Rolls completed weeks of Hub usage counts into the audit queue, flushes it and writes the heartbeat, without a
+/// Transcripts scan (searches and wiki opens are counted for users who never turn Transcripts on).
+fn sync_usage(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let _guard = state.transcripts_scan.lock_recover();
+    let Some(a) = audit_for(app, load_rules(&state).version) else { return };
+    if let Err(e) = a.rollup(&state.transcripts_dir) {
+        tracing::warn!("weekly counts rollup failed: {e:#}");
+    }
+    let wrote = a.flush().map(|n| n > 0).unwrap_or_else(|e| {
+        tracing::warn!("audit flush failed (queued, will retry): {e:#}");
+        false
+    });
+    if let Err(e) = a.heartbeat(wrote) {
+        tracing::warn!("audit heartbeat failed: {e:#}");
+    }
+}
+
+/// Frontend usage counter. Counts only; the field is whitelisted so the UI cannot write arbitrary keys.
+#[tauri::command]
+fn audit_count(app: AppHandle, field: String) {
+    if matches!(field.as_str(), "hub_searches" | "hub_wikis_opened") {
+        audit::bump(&app.state::<Arc<AppState>>().transcripts_dir, &field, 1);
+    }
+}
+
 /// Converts/categorizes any new transcripts, logs `auto_other` events, flushes the audit queue,
 /// writes the heartbeat, then tells the UI. No-op unless a folder is set.
 /// Blocking (file IO); callers off the main thread only.
@@ -1029,6 +1055,11 @@ pub fn run() {
                 begin_transcripts(handle, &path);
             }
             check_plugin_drift(handle);
+            let usage_app = handle.clone();
+            std::thread::spawn(move || loop {
+                sync_usage(&usage_app);
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            });
 
             Ok(())
         })
@@ -1076,6 +1107,7 @@ pub fn run() {
             set_transcripts_voc_skip,
             set_transcript_category,
             get_audit_status,
+            audit_count,
             get_raw_count,
             get_cleanup_age,
             get_inbox_count,

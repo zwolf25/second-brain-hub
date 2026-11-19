@@ -56,3 +56,4 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | F-8 | Staleness marker and "Stale" filter (90+ days) | 0.15.2 |
 | TD-14 | Testable frontend: pure helpers in `src/lib.js`, 7 `node --test` tests, run in `test.yml`. Auto-rule matching stays in Rust (not extracted). | 0.16.0 |
 | F-12 | Result filters and sort in a Filter drawer (wiki family, topic, sort, stale; Apply with live count; chips). Type filter dropped: 252/253 pages are `type: wiki`. | 0.16.0 |
+| F-16 | Hub search and wiki-open counters (`hub_searches`, `hub_wikis_opened`) and Transcripts-independent usage sync for the time-savings dashboard. | 0.17.0 |

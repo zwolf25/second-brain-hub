@@ -319,13 +319,14 @@ mod tests {
         assert_eq!(a.rollup(&data).unwrap(), 0, "current week is held back");
         let old = week_start("2020-01-08");
         assert_eq!(old, "2020-01-06");
-        std::fs::write(data.join("weekly-counts.json"), format!(r#"{{"weeks":{{"{old}":{{"converted":4,"reviewed":1}}}}}}"#)).unwrap();
+        std::fs::write(data.join("weekly-counts.json"), format!(r#"{{"weeks":{{"{old}":{{"converted":4,"reviewed":1,"hub_searches":7,"hub_wikis_opened":2}}}}}}"#)).unwrap();
         assert_eq!(a.rollup(&data).unwrap(), 1);
         assert_eq!(a.rollup(&data).unwrap(), 0, "a week is sent once");
         a.flush().unwrap();
         let body = std::fs::read_to_string(a.events_file()).unwrap();
         let v: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
         assert_eq!((v["event"].as_str(), v["converted"].as_u64(), v["week"].as_str()), (Some("weekly_counts"), Some(4), Some("2020-01-06")));
+        assert_eq!((v["hub_searches"].as_u64(), v["hub_wikis_opened"].as_u64()), (Some(7), Some(2)));
         assert!(!body.contains("title"), "counts only");
     }
 
