@@ -21,6 +21,29 @@ export function fuzzyScore(query, text) {
   return last - first;
 }
 
+// Header/banner/settings wording from a Rust onedrive::Status. Null status = not checked yet.
+export function onedriveSummary(status) {
+  if (!status) return { worst: "ok", pill: "", banner: "", setting: "Checking…" };
+  const top = status.issues.find((i) => i.severity === status.worst) ?? status.issues[0];
+  const pill = { red: "OneDrive: problem", yellow: "OneDrive: check" }[status.worst] ?? "";
+  const info = status.limited ? "Healthy (limited checks on Windows)" : "Healthy";
+  return {
+    worst: status.worst,
+    pill,
+    banner: status.worst === "red" && top ? `OneDrive needs attention: ${top.title.toLowerCase()}.` : "",
+    setting: status.worst === "ok" ? info : top ? `${status.worst === "red" ? "Problem" : "Check"}: ${top.title}` : info,
+  };
+}
+
+// Plain text a collaborator can paste to Zac when a fix doesn't work.
+export function onedriveDetails(status, version = "") {
+  if (!status) return "OneDrive status not checked yet.";
+  const lines = [`Second Brain Hub ${version} OneDrive details (${status.platform}), ${new Date(status.checked_at * 1000).toISOString()}`];
+  for (const c of status.checks) lines.push(`${{ g: "OK", y: "WARN", r: "FAIL", x: "n/a" }[c.state]}: ${c.label}`);
+  for (const i of status.issues) lines.push(`[${i.severity}] ${i.code}: ${i.title}`);
+  return lines.join("\n");
+}
+
 // Escapes the three characters that matter inside element text (same set the old DOM-based version did).
 export function escapeHtml(s) {
   return String(s ?? "")

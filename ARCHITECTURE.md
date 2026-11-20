@@ -27,6 +27,7 @@ Status: shipping; current version in `package.json`. Keyword search, Raw/Inbox/s
 | `skills.rs` | Walks the shared vault's `skills-repo` for every `SKILL.md`, parses name/description/mtime for the Skills catalog (§14) |
 | `render.rs` | Markdown to HTML for the viewer (`pulldown-cmark`): wikilinks, raw HTML shown as text (`sanitize_event`), `read_for_edit`/`write_for_edit` (§13) |
 | `graph.rs` | Wikilink resolution, backlinks, the Neural Map graph, and `link_health` (dead links + orphans, 0.15.0; Map page "Link health" tab) |
+| `onedrive.rs` | OneDrive health probe (0.18.0): process, sign-in, folder, and on macOS the sync-DB pending count plus an upload canary in the user's inbox folder. `evaluate` (pure) maps inputs to issues with fix steps; `probe` gathers them; polled every 5 min from `lib.rs`, event `onedrive-status`. Windows is limited (no canary). UI: header pill, ☰ dot, OneDrive page, Search banner, Settings row |
 | `plugins.rs` | Skill-plugin drift: installed versions vs the shared vault's manifests |
 | `transcripts.rs` | Teams `.vtt` to markdown, categorization rules, move/log queue (§15) |
 | `categorize.rs` | Zero-token transcript categorization: title rules, series inheritance |

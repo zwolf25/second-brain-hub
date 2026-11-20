@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -14,6 +14,7 @@ const viewerView = document.querySelector("#viewer-view");
 const mapView = document.querySelector("#map-view");
 const skillsView = document.querySelector("#skills-view");
 const transcriptsView = document.querySelector("#transcripts-view");
+const onedriveView = document.querySelector("#onedrive-view");
 const onboardingError = document.querySelector("#onboarding-error");
 const searchInput = document.querySelector("#search-input");
 const statusEl = document.querySelector("#status");
@@ -219,8 +220,8 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
-const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView };
-const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts" };
+const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView, onedrive: onedriveView };
+const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive" };
 let currentView = "search";
 let hasVault = false;
 function showView(name) {
@@ -1903,12 +1904,92 @@ function renderSkillsBadge(drift) {
   tag.textContent = drift.length;
   tag.classList.toggle("hidden", !isDrifted);
   skillsBadge.querySelector("kbd").classList.toggle("hidden", isDrifted);
-  document.querySelector("#menu-dot").classList.toggle("hidden", !isDrifted);
+  syncMenuDot();
   const menuTip = isDrifted ? `Menu — ${drift.length} skill plugin(s) behind the shared vault` : "Menu";
   menuBtn.title = menuTip;
   menuBtn.dataset.tooltip = menuTip;
   skillsUpdateBannerCount.textContent = drift.length;
   skillsUpdateBanner.classList.toggle("hidden", !isDrifted);
+}
+
+// The ☰ dot means "something needs you": skill-plugin drift or a OneDrive problem.
+function syncMenuDot() {
+  const od = onedriveSummary(onedriveStatus).worst === "red";
+  document.querySelector("#menu-dot").classList.toggle("hidden", !(pluginDrift.length > 0 || od));
+}
+
+// --- OneDrive health (Rust onedrive.rs probes every 5 min and on Refresh) ---
+
+let onedriveStatus = null;
+const onedrivePill = document.querySelector("#onedrive-pill");
+const onedriveBanner = document.querySelector("#onedrive-banner");
+const onedriveBadgeTag = document.querySelector("#onedrive-badge .nav-tag");
+const ODSNOOZE = "onedriveSnoozeUntil";
+
+function renderOneDrive(status) {
+  onedriveStatus = status;
+  const sum = onedriveSummary(status);
+  const issue = sum.worst !== "ok";
+  onedrivePill.classList.toggle("hidden", !issue);
+  onedrivePill.classList.toggle("od-red", sum.worst === "red");
+  onedrivePill.classList.toggle("count-alert", sum.worst === "yellow");
+  document.querySelector("#onedrive-pill-text").textContent = sum.pill;
+  onedriveBadgeTag.classList.toggle("hidden", !issue);
+  onedriveBadgeTag.textContent = issue ? "!" : "";
+  const snoozed = Number(localStorage.getItem(ODSNOOZE) || 0) > Date.now();
+  onedriveBanner.classList.toggle("hidden", !(sum.banner && !snoozed));
+  document.querySelector("#onedrive-banner-text").textContent = sum.banner;
+  document.querySelector("#onedrive-setting-value").textContent = sum.setting;
+  syncMenuDot();
+  if (status) renderOneDrivePage(status);
+}
+
+function renderOneDrivePage(status) {
+  const cards = status.issues.length
+    ? status.issues
+    : [{ severity: "ok", title: "OneDrive is syncing normally", detail: "Your files are up to date and uploads are reaching OneDrive. Nothing to do.", steps: [], can_open: false }];
+  document.querySelector("#onedrive-cards").innerHTML = cards
+    .map((i) => {
+      const cls = { red: "red", yellow: "yellow", info: "blue", ok: "green" }[i.severity];
+      const label = { red: "Problem", yellow: "Warning", info: "Info" }[i.severity] ?? "";
+      return `<div class="od-card od-${cls}"><h3>${escapeHtml(i.title)}${label ? `<span class="od-pill od-pill-${cls}">${label}</span>` : ""}</h3>
+        <p>${escapeHtml(i.detail)}</p>
+        ${i.steps.length ? `<div class="od-what">What to do</div><ol>${i.steps.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ol>` : ""}
+        ${i.can_open ? `<div class="od-acts"><button class="topbar-btn" data-od="open">Open OneDrive</button><button class="topbar-btn" data-od="copy">Copy details for Zac</button></div>` : ""}</div>`;
+    })
+    .join("");
+  document.querySelector("#onedrive-checks").innerHTML = status.checks
+    .map((c) => `<li><span class="od-dot od-dot-${c.state}"></span>${escapeHtml(c.label)}</li>`)
+    .join("");
+  document.querySelector("#onedrive-checked").textContent = `Last checked ${new Date(status.checked_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+async function refreshOneDrive({ manual = false } = {}) {
+  const btn = document.querySelector("#onedrive-refresh-btn");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const before = onedriveSummary(onedriveStatus).worst;
+    const status = await invoke("refresh_onedrive_status");
+    renderOneDrive(status);
+    if (manual) {
+      const now = onedriveSummary(status).worst;
+      const verifying = status.issues.some((i) => i.code === "verifying");
+      toast(
+        verifying ? "Verifying uploads. Check again in a few minutes." : now === "ok" ? (before === "ok" ? "OneDrive is syncing normally." : "Fixed. OneDrive is syncing again.") : `Still seeing: ${onedriveSummary(status).setting.replace(/^(Problem|Check): /, "")}`,
+      );
+    }
+  } catch (e) {
+    toast(`Couldn't check OneDrive: ${e}`, { error: true });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Refresh";
+  }
+}
+
+function showOneDriveView() {
+  showView("onedrive");
+  if (onedriveStatus) renderOneDrivePage(onedriveStatus);
 }
 
 async function checkPluginDrift() {
@@ -2005,6 +2086,31 @@ window.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => checkForAppUpdate(), 60 * 60 * 1000);
   checkPluginDrift();
   refreshCleanupBanner();
+  listen("onedrive-status", (event) => renderOneDrive(event.payload));
+  invoke("refresh_onedrive_status").then(renderOneDrive).catch(() => {});
+  document.querySelector("#onedrive-badge").addEventListener("click", showOneDriveView);
+  onedrivePill.addEventListener("click", showOneDriveView);
+  document.querySelector("#onedrive-banner-btn").addEventListener("click", showOneDriveView);
+  document.querySelector("#onedrive-setting-btn").addEventListener("click", showOneDriveView);
+  document.querySelector("#onedrive-banner-snooze-btn").addEventListener("click", () => {
+    localStorage.setItem(ODSNOOZE, String(Date.now() + 864e5));
+    onedriveBanner.classList.add("hidden");
+  });
+  document.querySelector("#onedrive-refresh-btn").addEventListener("click", () => refreshOneDrive({ manual: true }));
+  document.querySelector("#onedrive-cards").addEventListener("click", async (e) => {
+    const act = e.target.closest("[data-od]")?.dataset.od;
+    if (act === "open") invoke("open_onedrive").catch((err) => toast(`${err}`, { error: true }));
+    if (act === "copy") {
+      try {
+        await navigator.clipboard.writeText(onedriveDetails(onedriveStatus, await getVersion()));
+        toast("Copied. Paste it to Zac in Teams or Slack.");
+      } catch (err) {
+        toast(`Couldn't copy: ${err}`, { error: true });
+      }
+    }
+  });
+  // Coming back to the window after fixing OneDrive should not wait for the 5-minute poll.
+  window.addEventListener("focus", () => onedriveStatus?.worst !== "ok" && refreshOneDrive());
 
   listen("index-status", (event) => {
     renderStatus(event.payload);

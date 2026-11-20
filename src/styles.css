@@ -1541,6 +1541,58 @@ label.transcripts-toggle {
   font-size: 0.8em;
 }
 
+.update-banner-red {
+  background: #fde8e8;
+  border-color: #e5484d;
+}
+.update-banner-red .update-banner-text {
+  color: #7a1a1d;
+}
+.topbar-btn.od-red {
+  background: #fde8e8;
+  border-color: #e5484d;
+  color: #a02226;
+  font-weight: 600;
+}
+.od-page {
+  padding: 1em 1.2em 1.6em;
+  overflow-y: auto;
+}
+.od-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  margin-bottom: 0.9em;
+}
+.od-card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-left: 5px solid #aaa;
+  border-radius: 8px;
+  padding: 0.85em 1em;
+  margin-bottom: 0.8em;
+  color: #0f0f0f;
+}
+.od-red { border-left-color: #e5484d; }
+.od-yellow { border-left-color: #e0b800; }
+.od-green { border-left-color: #2fa56b; }
+.od-blue { border-left-color: #396cd8; }
+.od-card h3 { margin: 0 0 0.25em; font-size: 0.98em; display: flex; align-items: center; gap: 0.5em; }
+.od-card p { margin: 0.2em 0 0.5em; font-size: 0.88em; color: #333; }
+.od-card ol { margin: 0.2em 0 0.6em 1.2em; padding: 0; font-size: 0.85em; color: #333; }
+.od-what { font-size: 0.82em; font-weight: 600; margin-top: 0.55em; }
+.od-acts { display: flex; gap: 0.5em; flex-wrap: wrap; }
+.od-pill { font-size: 0.68em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 7px; border-radius: 999px; }
+.od-pill-red { background: #fde8e8; color: #a02226; }
+.od-pill-yellow { background: #fff3a3; color: #6b5b0a; }
+.od-pill-blue { background: #e4ecfc; color: #2a4fa8; }
+.od-checks { list-style: none; margin: 0 0 0.8em; padding: 0.7em 1em; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.4em 0.9em; font-size: 0.85em; background: #fff; border: 1px solid #ddd; border-radius: 8px; color: #0f0f0f; }
+.od-checks li { display: flex; align-items: center; gap: 0.5em; }
+.od-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #bbb; }
+.od-dot-g { background: #2fa56b; }
+.od-dot-y { background: #e0b800; }
+.od-dot-r { background: #e5484d; }
+
 .nav-tag {
   margin-left: auto;
   font-size: 0.75em;

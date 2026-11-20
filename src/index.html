@@ -17,6 +17,7 @@
         <span id="page-title" class="page-title">Search</span>
         <span id="status" class="status"></span>
         <span class="grow"></span>
+        <button id="onedrive-pill" class="topbar-btn hidden" title="OneDrive needs attention. Click for details." data-tooltip="OneDrive needs attention. Click for details."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg><span id="onedrive-pill-text"></span></button>
         <button id="inbox-badge" class="topbar-btn hidden" title="Inbox — items waiting for you. Click to run /inbox-review" data-tooltip="Inbox — items waiting for you. Click to run /inbox-review"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg><span id="inbox-count-num">0</span></button>
         <button id="raw-badge" class="topbar-btn hidden" title="Raw notes — unprocessed. Click to run /wiki-builder" data-tooltip="Raw notes — unprocessed. Click to run /wiki-builder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg><span id="raw-count-num">0</span></button>
         <button id="shared-raw-badge" class="topbar-btn hidden" title="Shared raw files — unprocessed across the whole shared Second Brain. No action needed; click to open the folder." data-tooltip="Shared raw files — unprocessed across the whole shared Second Brain. No action needed; click to open the folder."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><span id="shared-raw-count-num">0</span></button>
@@ -30,6 +31,7 @@
         <a id="transcripts-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>Transcripts<kbd>⌘2</kbd></a>
         <a id="skills-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>Skills<span class="nav-tag hidden"></span><kbd>⌘3</kbd></a>
         <a id="map-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Map<kbd>⌘4</kbd></a>
+        <a id="onedrive-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>OneDrive<span class="nav-tag hidden"></span></a>
         <hr />
         <a id="settings-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>Settings<kbd>⌘,</kbd></a>
       </nav>
@@ -136,6 +138,13 @@
           </li>
           <li class="setting-row">
             <div class="setting-row-main">
+              <span class="setting-label">OneDrive sync</span>
+              <span class="setting-value" id="onedrive-setting-value">Checking…</span>
+            </div>
+            <button id="onedrive-setting-btn" class="topbar-btn">View details</button>
+          </li>
+          <li class="setting-row">
+            <div class="setting-row-main">
               <span class="setting-label">Version</span>
               <span class="setting-value" id="app-version-value">—</span>
             </div>
@@ -152,6 +161,10 @@
 
       <!-- Main search view -->
       <section id="search-view" class="search-view hidden">
+        <div id="onedrive-banner" class="update-banner update-banner-red hidden">
+          <span class="update-banner-text">☁ <span id="onedrive-banner-text"></span></span>
+          <button id="onedrive-banner-btn" class="topbar-btn">See what to do</button><button id="onedrive-banner-snooze-btn" class="topbar-btn" title="Hide this for a day">Later</button>
+        </div>
         <div id="cleanup-banner" class="update-banner hidden">
           <span class="update-banner-text">🧹 <span id="cleanup-banner-text"></span></span>
           <button id="cleanup-banner-btn" class="topbar-btn">Run /wiki-cleanup</button><button id="cleanup-banner-snooze-btn" class="topbar-btn" title="Hide this for a week">Later</button>
@@ -236,6 +249,19 @@
           <div id="map-tooltip" class="map-tooltip" hidden></div>
         </div>
         <div id="map-caption" class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b> &middot; double-click to <b>open it</b></div>
+      </section>
+
+      <!-- OneDrive health: what is wrong, what to do, Refresh to re-check. -->
+      <section id="onedrive-view" class="skills-view hidden">
+        <div class="od-page">
+          <div class="od-head">
+            <button id="onedrive-refresh-btn" class="topbar-btn">Refresh</button>
+            <span id="onedrive-checked" class="muted"></span>
+          </div>
+          <div id="onedrive-cards"></div>
+          <ul id="onedrive-checks" class="od-checks"></ul>
+          <p class="muted">The Hub checks every 5 minutes. Nothing leaves your computer.</p>
+        </div>
       </section>
 
       <!-- Skills catalog: every skill in the shared vault's skills-repo,

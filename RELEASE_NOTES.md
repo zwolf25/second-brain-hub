@@ -1,1 +1,1 @@
-The Hub now keeps anonymous weekly counts of searches and wiki opens (never what you searched for or which page) so the team can see how much time the Second Brain saves. It also sends them for people who don't use Transcripts.
+The Hub now watches OneDrive for you: if syncing stops, a OneDrive alert shows in the header and the new OneDrive page tells you what's wrong and how to fix it, with a Refresh button to re-check. On Windows it confirms OneDrive is running, signed in and your folder is present, but can't yet verify uploads.

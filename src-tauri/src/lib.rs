@@ -8,6 +8,7 @@ mod frontmatter;
 mod graph;
 mod index;
 mod logging;
+mod onedrive;
 mod plugins;
 mod render;
 mod search;
@@ -793,6 +794,32 @@ fn get_shared_raw_count(state: State<Arc<AppState>>) -> Option<usize> {
     *state.shared_raw_count.lock_recover()
 }
 
+/// Probes OneDrive on a worker thread (it shells out and can take a few seconds), pushes the result
+/// to the UI and flags the tray tooltip. Used by the poll loop and the manual Refresh button.
+fn onedrive_check(app: &AppHandle) -> onedrive::Status {
+    let (vault, inbox) = {
+        let cfg = app.state::<Arc<AppState>>().config.lock_recover().clone();
+        (cfg.vault_path, cfg.inbox_path)
+    };
+    let status = onedrive::probe(vault.as_deref(), inbox.as_deref());
+    if let Some(t) = app.tray_by_id("hub") {
+        let tip = if status.worst == "ok" { "Second Brain Hub" } else { "Second Brain Hub: OneDrive needs attention" };
+        let _ = t.set_tooltip(Some(tip));
+    }
+    let _ = app.emit("onedrive-status", &status);
+    status
+}
+
+#[tauri::command]
+async fn refresh_onedrive_status(app: AppHandle) -> Result<onedrive::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || onedrive_check(&app)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_onedrive() -> Result<(), String> {
+    onedrive::open_app()
+}
+
 #[tauri::command]
 fn get_plugin_drift(state: State<Arc<AppState>>) -> Vec<plugins::PluginDrift> {
     state.plugin_drift.lock_recover().clone()
@@ -1055,6 +1082,11 @@ pub fn run() {
                 begin_transcripts(handle, &path);
             }
             check_plugin_drift(handle);
+            let od_app = handle.clone();
+            std::thread::spawn(move || loop {
+                onedrive_check(&od_app);
+                std::thread::sleep(std::time::Duration::from_secs(300));
+            });
             let usage_app = handle.clone();
             std::thread::spawn(move || loop {
                 sync_usage(&usage_app);
@@ -1113,6 +1145,8 @@ pub fn run() {
             get_inbox_count,
             get_shared_raw_count,
             get_plugin_drift,
+            refresh_onedrive_status,
+            open_onedrive,
             refresh_plugin_drift,
             get_skills,
             render_markdown,

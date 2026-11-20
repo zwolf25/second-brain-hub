@@ -13,7 +13,8 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | # | ID | Type | Item | V | E | Score | Why / evidence |
 |---|----|------|------|---|---|-------|----------------|
 | 4 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5). Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. Two teammates were asked on 2026-11-01. |
-| 5 | F-13 | Feature (new) | **Vault health page (owner-facing):** read `_status/pipelines.json` and the queue folders to show pipeline freshness and queue backlogs. Zero tokens. | 2 | 2 | 8 | Same data `sb_inventory.py` prints; the dashboard doctor covers Zac's machine, not the shared view. |
+| 5 | F-16 | Feature (new) | **OneDrive download check:** detect remote-to-local stalls (teammates' changes not arriving) and a real upload test on Windows. Needs a scheduled writer on another machine, or a Windows sync-state source. | 3 | 4 | 6 | 0.18.0 monitors uploads on macOS only; a Windows machine reports process, sign-in and folder only. |
+| 6 | F-13 | Feature (new) | **Vault health page (owner-facing):** read `_status/pipelines.json` and the queue folders to show pipeline freshness and queue backlogs. Zero tokens. | 2 | 2 | 8 | Same data `sb_inventory.py` prints; the dashboard doctor covers Zac's machine, not the shared view. |
 | 6 | TD-7 | Debt | **Split the big files.** `main.js` is 1,917 lines (one scope, all pages), `transcripts.rs` 1,773, and `lib.rs` 1,099 with ~60 commands in one file. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. Counts re-measured 2026-11-02 (were 1,673 / 1,642). |
 
 ## Not doing (decided)
