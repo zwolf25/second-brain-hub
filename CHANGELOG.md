@@ -2,6 +2,9 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.18.1
+- **OneDrive menu row gets ⌘5 / Ctrl+5**, matching the other ☰ rows. The `kbd` hint hides while the "!" tag shows, as Skills does.
+
 ## 0.18.0
 - **OneDrive health monitor for collaborators:** new `onedrive.rs` ports the ZacAI Dashboard's `scan_onedrive` into the Hub. A setup thread probes every 5 minutes (and on the Refresh button, and when the window regains focus while an issue is open); `onedrive_check` emits `onedrive-status`, sets the tray tooltip, and returns the result. `evaluate` is a pure function from probe inputs to `{worst, issues[], checks[]}`, and all user-facing wording and fix steps live there, so it is unit-tested without OneDrive. UI: red/yellow header pill, ☰ dot (now "plugin drift OR OneDrive problem"), OneDrive row in the ☰ menu with a "!" tag, a OneDrive page (issue cards with numbered steps, Open OneDrive, Copy details for Zac, Refresh, four-item checklist), a red banner on Search with a one-day "Later", and a Settings > Diagnostics row.
 - **macOS:** `pgrep` for the sync service, `defaults read ... IsBusinessProvisioned`, and the app's `SyncEngineDatabase.db` read through the system `sqlite3 -readonly` (no new crate). The account slot is discovered (newest DB/-wal under `~/Library/Application Support/OneDrive/settings/*`), not hardcoded to `Business1` as in the Dashboard. The upload canary is a hidden `.onedrive-canary` in the user's own inbox folder; its content is the server eTag revision it must reach, so a password change that leaves OneDrive "running and signed in" but not uploading goes red after 10 minutes. Canary under 10 minutes old shows an info "Verifying uploads" card, not red. Unreadable DB or eTag row after 10 minutes gives a yellow "Can't verify", never a false green or red.

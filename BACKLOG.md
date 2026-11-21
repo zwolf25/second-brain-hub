@@ -12,10 +12,15 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 
 | # | ID | Type | Item | V | E | Score | Why / evidence |
 |---|----|------|------|---|---|-------|----------------|
-| 4 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5). Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. Two teammates were asked on 2026-11-01. |
-| 5 | F-16 | Feature (new) | **OneDrive download check:** detect remote-to-local stalls (teammates' changes not arriving) and a real upload test on Windows. Needs a scheduled writer on another machine, or a Windows sync-state source. | 3 | 4 | 6 | 0.18.0 monitors uploads on macOS only; a Windows machine reports process, sign-in and folder only. |
+| 4 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5), plus the 0.18.0 OneDrive probes (`tasklist`, `reg query`, no console flash) on a real Windows machine. Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. Two teammates were asked on 2026-11-01. |
+| 5 | F-17 | Feature (new) | **OneDrive download check:** detect remote-to-local stalls (teammates' changes not arriving) and a real upload test on Windows. Needs a scheduled writer on another machine, or a Windows sync-state source. | 3 | 4 | 6 | 0.18.0 monitors uploads on macOS only; a Windows machine reports process, sign-in and folder only. |
+| 7 | F-18 | Feature (new) | **OS notification when OneDrive goes red** (once per episode), so a collaborator running the Hub from the tray finds out without opening the window. | 3 | 2 | 12 | 0.18.0 only alerts inside the window and the tray tooltip; the tray icon does not change. |
+| 8 | F-19 | Feature (new) | **Tray icon swap** (warning badge) while a OneDrive problem is open. Needs a second icon asset. | 2 | 2 | 8 | Planned as a nice-to-have in 0.18.0, not built; tooltip only. |
+| 9 | TD-15 | Debt (new) | **Unit-test the shortcut map and nav rows**: ⌘N keys and `<kbd>` hints are written twice (keydown `go` map and `index.html`), and ⌘5 was missed once. Extract the map to `lib.js` and test it against the nav rows. | 2 | 2 | 8 | Found 2026-11-20 when ⌘5 was missing after 0.18.0. |
 | 6 | F-13 | Feature (new) | **Vault health page (owner-facing):** read `_status/pipelines.json` and the queue folders to show pipeline freshness and queue backlogs. Zero tokens. | 2 | 2 | 8 | Same data `sb_inventory.py` prints; the dashboard doctor covers Zac's machine, not the shared view. |
-| 6 | TD-7 | Debt | **Split the big files.** `main.js` is 1,917 lines (one scope, all pages), `transcripts.rs` 1,773, and `lib.rs` 1,099 with ~60 commands in one file. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. Counts re-measured 2026-11-02 (were 1,673 / 1,642). |
+| 6 | TD-7 | Debt | **Split the big files.** `main.js` is 2,228 lines (one scope, all pages), `transcripts.rs` 1,776, and `lib.rs` 1,216 with ~60 commands in one file. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. Counts re-measured 2026-11-20 (were 1,917 / 1,773 / 1,099); the OneDrive page added ~300 lines to `main.js`. New code goes in `onedrive.rs`-style modules; a `onedrive.js` page module is the natural first split. |
+
+(F-16 in Done below is the 0.17.0 usage counters; the open download check was renumbered F-17 on 2026-11-20 to remove the clash.)
 
 ## Not doing (decided)
 - Incremental indexing (TD-9): a full rebuild of the real vault takes 594 ms (2026-11-01). Revisit if the `indexed N docs ... in M ms` log line shows seconds.
@@ -58,3 +63,5 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | TD-14 | Testable frontend: pure helpers in `src/lib.js`, 7 `node --test` tests, run in `test.yml`. Auto-rule matching stays in Rust (not extracted). | 0.16.0 |
 | F-12 | Result filters and sort in a Filter drawer (wiki family, topic, sort, stale; Apply with live count; chips). Type filter dropped: 252/253 pages are `type: wiki`. | 0.16.0 |
 | F-16 | Hub search and wiki-open counters (`hub_searches`, `hub_wikis_opened`) and Transcripts-independent usage sync for the time-savings dashboard. | 0.17.0 |
+| F-14 | OneDrive health monitor: header pill, ☰ red dot, OneDrive page with fix steps and Refresh, Search banner, Settings row; macOS full check (process, sign-in, pending, upload canary), Windows limited. Windows unverified on a real machine. | 0.18.0 |
+| — | ⌘5 / Ctrl+5 shortcut and `<kbd>` hint for the OneDrive menu row | 0.18.1 |

@@ -1886,7 +1886,7 @@ document.querySelector("#search-btn").addEventListener("click", showSearchView);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleMenu(false);
   if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !hasVault) return;
-  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, ",": showSettingsView }[e.key];
+  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, 5: showOneDriveView, ",": showSettingsView }[e.key];
   if (!go || (go === showTranscriptsView && document.querySelector("#transcripts-btn").classList.contains("hidden"))) return;
   e.preventDefault();
   go();
@@ -1936,6 +1936,7 @@ function renderOneDrive(status) {
   document.querySelector("#onedrive-pill-text").textContent = sum.pill;
   onedriveBadgeTag.classList.toggle("hidden", !issue);
   onedriveBadgeTag.textContent = issue ? "!" : "";
+  document.querySelector("#onedrive-badge kbd").classList.toggle("hidden", issue);
   const snoozed = Number(localStorage.getItem(ODSNOOZE) || 0) > Date.now();
   onedriveBanner.classList.toggle("hidden", !(sum.banner && !snoozed));
   document.querySelector("#onedrive-banner-text").textContent = sum.banner;
