@@ -2144,6 +2144,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     reindexBtn.disabled = true;
     invoke("reindex_now");
     invoke("refresh_plugin_drift").then(renderSkillsBadge);
+    renderLinkHealth(); // reads the wikis folder directly, so it also updates the tab's count badge
   });
 
   document.querySelector("#transcripts-btn").addEventListener("click", showTranscriptsView);

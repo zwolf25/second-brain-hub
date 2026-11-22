@@ -2,6 +2,10 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.18.2
+- **Refresh also re-runs Link health:** the top-bar Refresh button now calls `renderLinkHealth()` next to `reindex_now`, so the Link health list and its count badge update without reopening the tab. Before, a wiki fixed in the vault kept showing as an orphan until the tab was reopened. `link_health` reads the wikis folder directly (not the search index), so it needs no wait on the re-index. Touched: `src/main.js` (reindex click handler).
+- Not verified: the UI in the running app (SMOKE item 28). No Rust changes.
+
 ## 0.18.1
 - **OneDrive menu row gets ⌘5 / Ctrl+5**, matching the other ☰ rows. The `kbd` hint hides while the "!" tag shows, as Skills does.
 
