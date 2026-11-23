@@ -1674,3 +1674,40 @@ label.transcripts-toggle {
 .pl-detail > div:not(.pl-dv) { grid-column: 1 / -1; }
 .pl-vr select { width: 11em; max-width: 11em; text-overflow: ellipsis; font-size: 0.85em; }
 .pl-vr > div:last-child { flex: 0 0 auto; max-width: 12em; }
+
+@media (prefers-color-scheme: dark) {
+  .pl-feeds { color: #aab0b8; }
+  .pl-q, .pl-row, .pl-vr, .pl-vrow { border-color: #333; }
+  .pl-tabs { border-color: #3a3a3a; }
+  .pl-tab { color: #9aa0a8; }
+  .pl-tab.on { color: #7aa2ff; border-color: #7aa2ff; }
+  .pl-tab i { background: #3a3f48; color: #ccc; }
+  .pl-voc { border-top-color: #3a3a3a; }
+  .pl-chip { border-color: #555; color: #bbb; }
+  .pl-tag { background: #3a3f48; color: #ccc; }
+  .pl-tag.loss { background: #4a2626; color: #ffb3b3; }
+  .pl-tag.win { background: #1f3d2c; color: #8fe0b0; }
+  .pl-tag.churn, .pl-warn { background: #4a3a14; color: #ffd98a; }
+  .pl-tag.expansion, .pl-tag.renewal, .pl-tag.services { background: #3a3f48; color: #ccc; }
+  .pl-gate { background: #4a2626; color: #ffb3b3; }
+  .pl-vr a, .pl-vh + .pl-chips a { color: #aab0b8; }
+  .pl-detail { background: #2a2d33; }
+  .pl-detail a { color: #7aa2ff; }
+  .pl-next { background: #26324d; color: #e6e9ef; }
+  .pl-dot { background: #666; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .error { color: #ff8a80; }
+  .result-snippet b { background: #5c4f00; color: #fff3a3; }
+  .show-all-btn { background: #2a2a2a; border-color: #555; color: #7aa2ff; }
+  .t-expand:hover { color: #7aa2ff; }
+  .health-ro { background: #4a3a14; color: #ffd98a; }
+  .update-banner-red { background: #4a2626; }
+  .update-banner-red .update-banner-text { color: #ffb3b3; }
+  .topbar-btn.od-red, .od-pill-red { background: #4a2626; color: #ffb3b3; }
+  .od-card, .od-checks { background: #26282c; border-color: #3a3a3a; color: #e6e9ef; }
+  .od-card p, .od-card ol { color: #c8ccd2; }
+  .od-pill-yellow { background: #4a3a14; color: #ffd98a; }
+  .od-pill-blue { background: #26324d; color: #a9c1ff; }
+}

@@ -2,6 +2,10 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.20.3
+- **Dark mode fixes.** The Market Intel page had no dark styles, so the VoC detail panel, "Next up" banner, tags, tabs and borders were light-on-light and unreadable. Added a dark block for every `.pl-*` rule. Audit of the whole stylesheet found 15 more rules with light-only colours and no dark override (`.result-snippet b` highlight with inherited light text, `.od-card`, `.od-checks`, `.od-pill-*`, `.update-banner-red`, `.show-all-btn`, `.health-ro`, `.error`, `.t-expand:hover`); all now have dark values. Hex colours only were audited; the Neural Map canvas already follows the OS theme in JS.
+- Not verified by eye (Claude cannot click the app): please check Market Intel, Search highlights, the OneDrive page and a red update banner in dark mode.
+
 ## 0.20.2
 - **VoC filter and sort side panel**, same pattern as Search: Filter button (count badge) opens a drawer with Show (type, Claimed or requested, Declined), "Assigned to me", "Include services and change orders", and Sort (priority or days left). Draft vs applied state, live "Apply · N accounts", Reset, Esc/scrim to close, removable chips under the search box. The old chip row, sort select and services checkbox are gone; keyword search stays inline.
 - **Assigned to me** = `claimed_by` or `requested_by` equals the roster name (`get_claim_name`); `vocBuild` gains `mine`. Disabled with a tooltip when no inbox is set up.
