@@ -1,1 +1,1 @@
-The Refresh button now also refreshes Link health, so fixed orphan and broken-link entries clear without reopening the tab.
+Fixes a false OneDrive alert saying the Hub's test file was never confirmed. If you saw it, it was a bug in the check, not a sync problem.
