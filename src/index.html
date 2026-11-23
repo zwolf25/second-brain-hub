@@ -30,8 +30,8 @@
         <a id="search-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search<kbd>⌘1</kbd></a>
         <a id="transcripts-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>Transcripts<kbd>⌘2</kbd></a>
         <a id="skills-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>Skills<span class="nav-tag hidden"></span><kbd>⌘3</kbd></a>
-        <a id="map-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Map<kbd>⌘4</kbd></a>
-        <a id="pipeline-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h12M3 18h6"/></svg>Pipeline<span class="nav-tag hidden"></span><kbd>⌘6</kbd></a>
+        <a id="map-btn" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Neural Map<kbd>⌘4</kbd></a>
+        <a id="pipeline-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h12M3 18h6"/></svg>Market Intel<span class="nav-tag hidden"></span><kbd>⌘6</kbd></a>
         <a id="onedrive-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>OneDrive<span class="nav-tag hidden"></span><kbd>⌘5</kbd></a>
         <hr />
         <a id="settings-badge" role="button" tabindex="0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>Settings<kbd>⌘,</kbd></a>
@@ -261,6 +261,26 @@
           <div id="pipeline-tabs" class="pl-tabs"></div>
           <div id="pipeline-rows"></div>
           <div id="voc-box" class="pl-voc hidden"></div>
+          <div id="vf-scrim" class="filter-scrim hidden"></div>
+          <aside id="vf-drawer" class="filter-drawer hidden" role="dialog" aria-label="VoC backlog filters">
+            <div class="filter-head"><strong>Filters</strong><button id="vf-close" class="filter-x" type="button" aria-label="Close filters">×</button></div>
+            <div class="filter-body">
+              <label class="filter-field">Show
+                <select id="vf-type"></select>
+              </label>
+              <label class="stale-toggle" id="vf-mine-label"><input id="vf-mine" type="checkbox" /> Assigned to me (claimed or requested by me)</label>
+              <label class="stale-toggle"><input id="vf-svc" type="checkbox" /> Include services and change orders</label>
+              <fieldset class="filter-field filter-sort">
+                <legend>Sort</legend>
+                <label><input type="radio" name="vf-sort" value="priority" checked /> Priority</label>
+                <label><input type="radio" name="vf-sort" value="days" /> Days left in window</label>
+              </fieldset>
+            </div>
+            <div class="filter-foot">
+              <button id="vf-reset" class="topbar-btn" type="button">Reset</button>
+              <button id="vf-apply" class="topbar-btn filter-apply" type="button">Apply</button>
+            </div>
+          </aside>
         </div>
       </section>
 

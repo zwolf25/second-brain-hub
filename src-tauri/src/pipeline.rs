@@ -1,5 +1,5 @@
 //! Pipeline page data: the staleness JSON (passed through as text) and the VoC backlog.
-//! The backlog is parsed from `win-loss/interview-wishlist.md`; Claim and Dismiss state lives in one small
+//! The backlog is the Salesforce opportunity sidecar `win-loss/voc-candidates.json` (the wishlist only supplies a status); Claim and Dismiss state lives in one small
 //! marker file per candidate under `win-loss/_voc/` (owner decision 2026-11-23: the Hub writes these markers).
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -204,13 +204,11 @@ pub fn load(root: &Path) -> PipelineData {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
-    // The sidecar is richer and its amounts are sanity-checked, so it wins; wishlist rows add churn and hand-written entries.
+    // The backlog is Salesforce opportunities only (the sidecar and its criteria); the wishlist just supplies a status.
     let mut voc: Vec<VocRow> = side.rows.into_iter().map(row_from).collect();
     for r in &mut voc {
         r.status = wishlist.iter().find(|w| w.key == r.key).map(|w| w.status.clone()).unwrap_or_default();
     }
-    let have: std::collections::HashSet<String> = voc.iter().map(|r| r.key.clone()).collect();
-    voc.extend(wishlist.into_iter().filter(|w| !have.contains(&w.key)));
     let dir = root.join("win-loss").join("_voc");
     for r in &mut voc {
         r.claimed_by = marker_field(&dir.join(format!("{}.claim.json", r.key)), "by");
@@ -265,6 +263,8 @@ mod tests {
         let d = std::env::temp_dir().join(format!("hub-voc-{}", std::process::id()));
         std::fs::create_dir_all(d.join("win-loss")).unwrap();
         std::fs::write(d.join("win-loss/interview-wishlist.md"), SAMPLE).unwrap();
+        let side = r#"{"rows":[{"key":"urban-barn-2026-09-22","kind":"loss","type":"new_logo","account":"Urban Barn","closed":"2026-09-22"},{"key":"acme-co-2026-08-01","kind":"loss","type":"new_logo","account":"Acme Co.","closed":"2026-08-01"}]}"#;
+        std::fs::write(d.join("win-loss/voc-candidates.json"), side).unwrap();
         set_marker(&d, "urban-barn-2026-09-22", "claim", "Zac").unwrap();
         set_marker(&d, "acme-co-2026-08-01", "declined", "Deal too small").unwrap();
         let p = load(&d);
@@ -287,10 +287,9 @@ mod tests {
             "acv":42000,"acv_source":"opportunity amount","reason_code":"Sales","csm":"Pat","contact":{"name":"Lee","title":"VP","email":"l@x.com"}}]}"#;
         std::fs::write(d.join("win-loss/voc-candidates.json"), side).unwrap();
         let p = load(&d);
-        assert_eq!(p.voc.len(), 2); // Urban Barn from the sidecar, Acme (tier 5) still from the wishlist
+        assert_eq!(p.voc.len(), 1); // Salesforce rows only; the wishlist-only Acme row is not shown
         assert_eq!((p.voc[0].vtype.as_str(), p.voc[0].csm.as_str(), p.voc[0].status.as_str()), ("new_logo", "Pat", "Open"));
         assert_eq!(p.voc[0].contact.as_ref().unwrap().email.as_deref(), Some("l@x.com"));
-        assert_eq!(p.voc[1].account, "Acme Co.");
         let side2 = r#"{"rows":[{"key":"k-2026-10-01","kind":"loss","type":"new_logo","account":"K","closed":"2026-10-01","reason_code":"Timing","amount":9000000,"amount_flag":true,"sfdc_url":"https://x/o"}]}"#;
         std::fs::write(d.join("win-loss/voc-candidates.json"), side2).unwrap();
         let p2 = load(&d);

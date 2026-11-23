@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft } from "./lib.js";
+import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft, updateErrorText } from "./lib.js";
 
 test("fuzzyScore: subsequence match, tighter span scores lower, miss is null", () => {
   assert.equal(fuzzyScore("wo", "Work Orders"), 1);
@@ -140,4 +140,22 @@ test("vocBuild hides completed VoCs and can sort by days left", () => {
 test("vocBuild claimed filter lists claimed and requested rows", () => {
   const rows = [{ account: "A", kind: "loss", date: "2026-11-01", key: "a", claimed_by: "Zac" }, { account: "B", kind: "loss", date: "2026-11-01", key: "b" }];
   assert.deepEqual(vocBuild(rows, { type: "claimed", today: Date.parse("2026-11-23") }).map((g) => g.best.key), ["a"]);
+});
+
+test("updateErrorText turns updater errors into plain language", () => {
+  assert.match(updateErrorText("None of the fallback platforms `[\"darwin-aarch64-app\"]` were found in the response `platforms` object"), /still being built/);
+  assert.match(updateErrorText(new Error("error sending request for url")), /internet or VPN/);
+  assert.match(updateErrorText("weird"), /tell the owner/);
+});
+
+test("vocBuild mine keeps only rows claimed or requested by that person", () => {
+  const rows = [
+    { account: "A", kind: "loss", type: "new_logo", acv: 9e5, date: "2026-11-20", key: "a", claimed_by: "Zac Wolf" },
+    { account: "B", kind: "loss", type: "new_logo", acv: 9e5, date: "2026-11-20", key: "b", requested_by: "Zac Wolf" },
+    { account: "C", kind: "loss", type: "new_logo", acv: 9e5, date: "2026-11-20", key: "c", claimed_by: "Other" },
+    { account: "D", kind: "loss", type: "new_logo", acv: 9e5, date: "2026-11-20", key: "d" },
+  ];
+  const T = Date.parse("2026-11-23");
+  assert.deepEqual(vocBuild(rows, { today: T, mine: "Zac Wolf" }).map((g) => g.best.key).sort(), ["a", "b"]);
+  assert.equal(vocBuild(rows, { today: T }).length, 4);
 });

@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, vocDaysLeft, VOC_TYPES } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -222,7 +222,7 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
 const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView, onedrive: onedriveView, pipeline: pipelineView };
-const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive", pipeline: "Pipeline" };
+const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Neural Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive", pipeline: "Market Intelligence Pipeline" };
 let currentView = "search";
 let hasVault = false;
 function showView(name) {
@@ -2024,7 +2024,7 @@ async function checkForAppUpdate({ manual = false } = {}) {
     pendingUpdate = await checkForUpdate();
   } catch (e) {
     console.log("[update] check failed:", e);
-    if (manual) toast(`Couldn't check for updates:\n${e}`, { error: true });
+    if (manual) toast(updateErrorText(e), { error: true });
     return;
   }
   if (pendingUpdate) {
@@ -2233,7 +2233,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 
 // ---- Pipeline page (reads _status/intel-staleness.json and win-loss/interview-wishlist.md; Run opens Claude) ----
-let plData = null, plTab = "wl", plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plClaimName = null, plOpen = new Set();
+let plData = null, plTab = "wl", plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plVocMine = false, plClaimName = null, plOpen = new Set();
 
 async function showPipelineView() {
   showView("pipeline");
@@ -2294,23 +2294,80 @@ function vocDetail(g) {
   ])}${!r.reason_text && !r.why ? `<div class="muted">No reason recorded in SFDC for this deal.</div>` : ""}</div>`;
 }
 
+const VF_DEFAULT = { type: "all", mine: false, services: false, sort: "priority" };
+const vocOpts = () => ({ query: plVocQuery, services: plVocServices, sort: plVocSort, mine: plVocMine ? plClaimName || "\u0000" : "" });
+const vfTypes = () => [["all", "All open"], ...Object.entries(VOC_TYPES), ["claimed", "Claimed or requested"], ["declined", "Declined"]];
+
+function renderVocChips() {
+  const chips = [
+    plVocFilter !== "all" && ["type", `Show: ${vfTypes().find(([k]) => k === plVocFilter)?.[1] ?? plVocFilter}`],
+    plVocMine && ["mine", "Assigned to me"],
+    plVocServices && ["services", "Incl. services"],
+    plVocSort !== "priority" && ["sort", "Sort: days left"],
+  ].filter(Boolean);
+  const box = document.querySelector("#vf-chips");
+  box.innerHTML = chips.map(([k, l]) => `<button type="button" class="filter-chip" data-vfx="${k}" aria-label="Remove filter ${escapeHtml(l)}">${escapeHtml(l)} ×</button>`).join("");
+  box.classList.toggle("hidden", !chips.length);
+  const c = document.querySelector("#vf-count");
+  c.textContent = chips.length;
+  c.classList.toggle("hidden", !chips.length);
+}
+function vfDraft() {
+  return {
+    type: document.querySelector("#vf-type").value, mine: document.querySelector("#vf-mine").checked,
+    services: document.querySelector("#vf-svc").checked,
+    sort: document.querySelector('input[name="vf-sort"]:checked').value,
+  };
+}
+function vfSet(d) {
+  const sel = document.querySelector("#vf-type");
+  sel.innerHTML = vfTypes().map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join("");
+  sel.value = d.type;
+  document.querySelector("#vf-mine").checked = d.mine;
+  document.querySelector("#vf-mine").disabled = !plClaimName;
+  document.querySelector("#vf-mine-label").title = plClaimName ? "" : "No Second Brain inbox found for you, so nothing can be assigned to you.";
+  document.querySelector("#vf-svc").checked = d.services;
+  document.querySelector(`input[name="vf-sort"][value="${d.sort}"]`).checked = true;
+  vfCount();
+}
+function vfCount() {
+  const d = vfDraft();
+  const n = vocBuild(plData?.voc ?? [], { query: plVocQuery, services: d.services, sort: d.sort, mine: d.mine ? plClaimName || "\u0000" : "", type: d.type }).length;
+  document.querySelector("#vf-apply").textContent = `Apply · ${n} accounts`;
+}
+function vfOpen(on) {
+  if (on) vfSet({ type: plVocFilter, mine: plVocMine, services: plVocServices, sort: plVocSort });
+  document.querySelector("#vf-drawer").classList.toggle("hidden", !on);
+  document.querySelector("#vf-scrim").classList.toggle("hidden", !on);
+}
+function vfApply(d) {
+  plVocFilter = d.type; plVocMine = d.mine; plVocServices = d.services; plVocSort = d.sort;
+  if (!plVocServices && plVocFilter === "services") plVocFilter = "all";
+  vfOpen(false);
+  renderVoc();
+}
+document.querySelector("#vf-apply").addEventListener("click", () => vfApply(vfDraft()));
+document.querySelector("#vf-reset").addEventListener("click", () => vfSet(VF_DEFAULT));
+document.querySelector("#vf-close").addEventListener("click", () => vfOpen(false));
+document.querySelector("#vf-scrim").addEventListener("click", () => vfOpen(false));
+document.querySelector("#vf-drawer").addEventListener("input", vfCount);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !document.querySelector("#vf-drawer").classList.contains("hidden")) vfOpen(false); });
+
 function renderVoc() {
   const box = document.querySelector("#voc-box");
   const all = plData?.voc ?? [];
   box.classList.toggle("hidden", plTab !== "wl" || !all.length);
   if (plTab !== "wl" || !all.length) return;
-  const opts = { query: plVocQuery, services: plVocServices, sort: plVocSort };
+  const opts = vocOpts();
   const groups = vocBuild(all, { ...opts, type: plVocFilter });
-  const count = (f) => vocBuild(all, { ...opts, type: f }).length;
   if (!box.querySelector("#voc-q")) {
     box.innerHTML = `<div class="pl-vh"><b>VoC backlog</b><span class="muted" id="voc-sub"></span></div>
-      <div class="pl-chips" id="voc-chips"></div>
-      <div class="pl-chips"><input id="voc-q" type="search" placeholder="Search account, rep, CSM, contact, reason, competitor..." value="${escapeHtml(plVocQuery)}"><select id="voc-sort"><option value="priority">Sort: priority</option><option value="days">Sort: days left in window</option></select><label class="muted"><input type="checkbox" id="voc-svc" ${plVocServices ? "checked" : ""}> show services and change orders</label></div>
+      <div class="pl-chips"><input id="voc-q" type="search" placeholder="Search account, rep, CSM, contact, reason, competitor..." value="${escapeHtml(plVocQuery)}"><button id="vf-btn" class="topbar-btn" type="button" aria-haspopup="dialog" title="Filter and sort the backlog">Filter <span id="vf-count" class="filter-count hidden"></span></button></div>
+      <div id="vf-chips" class="filter-chips hidden"></div>
       <div id="voc-next"></div><div id="voc-list"></div>`;
   }
   box.querySelector("#voc-sub").textContent = `${groups.length} accounts · ordered by type, deal size and time left · auto-declined: Prospect Went Dark, Timing · rows for current customers need the active-customer gate before outreach`;
-  const chip = (f, l) => `<button class="pl-chip ${plVocFilter === f ? "on" : ""}" data-vf="${f}">${l} ${count(f)}</button>`;
-  box.querySelector("#voc-chips").innerHTML = chip("all", "All") + Object.entries(VOC_TYPES).filter(([k]) => k !== "services" || plVocServices).map(([k, l]) => chip(k, l)).join("") + chip("claimed", "Claimed") + chip("declined", "Declined");
+  renderVocChips();
   const top = groups.find((g) => !g.best.claimed_by && !g.best.requested_by);
   box.querySelector("#voc-next").innerHTML = top && !plVocQuery ? `<div class="pl-next" data-open="${top.best.key}"><b>Next up:</b> ${escapeHtml(top.best.account)} · ${escapeHtml(VOC_TYPES[vocType(top.best)])} · ${vocShown(top.best)} · ${vocDaysLeft(top.best)} days left in the window</div>` : "";
   const canClaim = !!plClaimName;
@@ -2338,7 +2395,8 @@ pipelineView.addEventListener("click", (e) => {
   if (d("ext")) return openUrl(d("ext")).catch((e) => alert(`Couldn't open the link:\n${e}`));
   if (d("run")) return launchClaudeCommand(d("run"));
   if (d("tab")) { plTab = d("tab"); return renderPipeline(); }
-  if (d("vf")) { plVocFilter = d("vf"); return renderVoc(); }
+  if (t.closest("#vf-btn")) return vfOpen(true);
+  if (d("vfx")) { const k = d("vfx"); return vfApply({ type: plVocFilter, mine: plVocMine, services: plVocServices, sort: plVocSort, [k]: VF_DEFAULT[k] }); }
   const row = (k) => plData.voc.find((r) => r.key === k);
   if (d("open")) { const k = d("open"); plOpen.has(k) ? plOpen.delete(k) : plOpen.add(k); return renderVoc(); }
   if (d("claim")) return plClaimName && setVocMarker(d("claim"), "claim", plClaimName);
@@ -2358,6 +2416,4 @@ pipelineView.addEventListener("click", (e) => {
 pipelineView.addEventListener("change", (e) => { const k = e.target.dataset?.reason; if (k && e.target.value) setVocMarker(k, "declined", e.target.value); });
 pipelineView.addEventListener("input", (e) => {
   if (e.target.id === "voc-q") { plVocQuery = e.target.value; renderVoc(); }
-  if (e.target.id === "voc-sort") { plVocSort = e.target.value; renderVoc(); }
-  if (e.target.id === "voc-svc") { plVocServices = e.target.checked; if (!plVocServices && plVocFilter === "services") plVocFilter = "all"; renderVoc(); }
 });

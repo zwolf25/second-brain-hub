@@ -2,6 +2,14 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.20.2
+- **VoC filter and sort side panel**, same pattern as Search: Filter button (count badge) opens a drawer with Show (type, Claimed or requested, Declined), "Assigned to me", "Include services and change orders", and Sort (priority or days left). Draft vs applied state, live "Apply · N accounts", Reset, Esc/scrim to close, removable chips under the search box. The old chip row, sort select and services checkbox are gone; keyword search stays inline.
+- **Assigned to me** = `claimed_by` or `requested_by` equals the roster name (`get_claim_name`); `vocBuild` gains `mine`. Disabled with a tooltip when no inbox is set up.
+- **VoC backlog is Salesforce only.** `pipeline.rs::load` no longer appends wishlist-only rows (churn Tier 5, Tier 3 gate rows, older Clozd carry-overs); what shows is exactly what `sfdc_sync.py --target opps` exports (opportunities closed in the last 90 days, its type and value rules). The wishlist still supplies a row's status. Wishlist-only rows such as Tractor Supply (2025-10) disappear.
+- **Renames:** menu item Pipeline is now "Market Intel" (page title "Market Intelligence Pipeline"); Map is now "Neural Map".
+- **Friendly updater errors** (`updateErrorText`) replace the raw "None of the fallback platforms" text.
+- Not verified: visual layout and dark mode of the drawer (Claude cannot click the app); Windows.
+
 ## 0.20.1
 - **VoC backlog feedback round 2.** Detail rows now have a "Open in Salesforce" link (sidecar `sfdc_url`; capability allows `https://*.salesforce.com/*` and `*.force.com`). The button reads just "Claim". Multi-line values (seller notes) sit in a label/value grid so wrapped lines align under the text, not under the label.
 - **Window is 90 days** (`VOC_MAX_AGE_DAYS` in `sfdc_sync.py` and `wishlist_sync.py`, `lib.js`, detail text).

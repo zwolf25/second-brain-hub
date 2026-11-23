@@ -1,1 +1,1 @@
-The VoC backlog now links to the Salesforce record, drops the 'amount?' and 'gate first' labels, auto-declines Prospect Went Dark and Timing losses, and uses a 90 day window.
+The VoC backlog now shows only Salesforce opportunities, has a Filter panel like Search with an Assigned to me option, and the menu names are now Market Intel and Neural Map. Update errors are easier to read.

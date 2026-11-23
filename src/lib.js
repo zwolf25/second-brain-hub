@@ -147,9 +147,10 @@ function vocHay(r) {
     .filter(Boolean).join(" ").toLowerCase();
 }
 /** One entry per account: best candidate in `best`, the account's other deals in `others`. */
-export function vocBuild(rows, { type = "all", query = "", services = false, sort = "priority", today = Date.now() } = {}) {
+export function vocBuild(rows, { type = "all", query = "", services = false, sort = "priority", mine = "", today = Date.now() } = {}) {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const pool = rows.filter((r) => (type === "declined" ? r.declined : !r.declined && !/^(done|completed)/i.test(r.status || ""))
+  const pool = rows.filter((r) => (!mine || r.claimed_by === mine || r.requested_by === mine)
+    && (type === "declined" ? r.declined : !r.declined && !/^(done|completed)/i.test(r.status || ""))
     && (services || type === "services" || vocType(r) !== "services")
     && (type === "all" || type === "declined" || (type === "claimed" ? r.claimed_by || r.requested_by : vocType(r) === type)));
   const byAcct = new Map();
@@ -167,4 +168,13 @@ export function vocBuild(rows, { type = "all", query = "", services = false, sor
   const parked = (g) => (g.best.claimed_by || g.best.requested_by ? 1 : 0);
   const by = sort === "days" ? (a, b) => vocDaysLeft(a.best, today) - vocDaysLeft(b.best, today) : (a, b) => b.score - a.score;
   return groups.sort((a, b) => parked(a) - parked(b) || by(a, b));
+}
+
+/** Plain-language text for an updater failure; the raw error stays in the console. */
+export function updateErrorText(e) {
+  const m = String(e?.message ?? e);
+  if (/fallback platforms|platforms.*object/i.test(m)) return "A new version is still being built for your computer. Wait a few minutes and try again.";
+  if (/error sending request|dns|timed out|timeout|network|connect|could not fetch|failed to fetch/i.test(m)) return "Couldn't reach the update server. Check your internet or VPN, then try again.";
+  if (/signature/i.test(m)) return "The update didn't pass its security check, so it wasn't installed. Tell the owner.";
+  return `Something went wrong while checking. Try again in a few minutes; if it keeps happening, tell the owner.\n(${m.slice(0, 160)})`;
 }

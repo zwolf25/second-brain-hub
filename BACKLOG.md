@@ -66,4 +66,5 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | F-14 | OneDrive health monitor: header pill, ☰ red dot, OneDrive page with fix steps and Refresh, Search banner, Settings row; macOS full check (process, sign-in, pending, upload canary), Windows limited. Windows unverified on a real machine. | 0.18.0 |
 | — | ⌘5 / Ctrl+5 shortcut and `<kbd>` hint for the OneDrive menu row | 0.18.1 |
 | 0.19.0 | F-13 (part) | Pipeline page: staleness tabs, queues, VoC backlog with Claim / Request / Dismiss markers. | | | | Plan panel with step costs and owner-only rows deferred (no data in the JSON). |
+| 0.20.2 | F-13 (part) | VoC filter/sort side panel with Assigned to me. | | | | |
 | 0.20.0 | F-13 (part) | VoC backlog: SFDC sidecar, type-aware ordering, account grouping, search, expand row, roster-name Claim. | | | | Update plan panel, owner-only rows, shared queues (WS12) still open. |
