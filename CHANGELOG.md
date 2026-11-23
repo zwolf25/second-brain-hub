@@ -2,6 +2,13 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.19.0
+- **Pipeline page (⌘6, BACKLOG F-13 first half):** new `pipeline.rs` (commands `get_pipeline`, `set_voc_marker`) reads `_status/intel-staleness.json` (passed through as text) and parses `win-loss/interview-wishlist.md` into VoC rows. Frontend: three flow-order tabs (Win/Loss/Churn, PMDs, Competitive) with stale rows first, a Queues fold, and Update / Process buttons that open Claude through `launchClaudeCommand`. `lib.js` gets `pipelineTabs`, `vocPriority`, `vocVisible` with tests.
+- **VoC backlog under Win/Loss/Churn:** rows from tiers 1, 2, 3 and 5 (win-back and the churn-track tier stay out), sorted by deal size (High from $150K, Med from $50K). Claim writes `win-loss/_voc/<key>.claim.json`, Dismiss writes `<key>.declined.json` with a reason, Release and Undo delete them; the key is account slug plus closed date. Request VoC opens Claude with `/voc-skills:voc-recruit <account>` and asks the session to set Status = Requested in the wishlist.
+- **Decision (Zac, 2026-11-23):** the Hub writes these marker files itself. This is the one write the Hub makes into the shared vault, so every collaborator needs write access to `win-loss/_voc/`. OneDrive conflict copies are possible if two people act on the same row at once.
+- **Differs from the v3 mockup:** the Update plan panel (steps and token costs) is not built because no step or cost data exists in the JSON; Update opens Claude directly. Owner-only "Tell the owner" rows are not built.
+- Not verified: the page in the running app (SMOKE item 29), Windows, collaborator write access to `win-loss/_voc/`.
+
 ## 0.18.3
 - **Fixes a false "Hub's test file was written N minutes ago and never confirmed" OneDrive alert.** Every collaborator's inbox holds a `.hub-onedrive-canary`, and your OneDrive syncs all of them. `canary_revision()` looked the file up by name only, got several rows, and the parser took the last one, so it compared a teammate's server revision to your own and reported a failed upload. It now joins to the parent folder and matches only your own inbox folder. `parse_revision()` accepts exactly one row; zero or several rows read as "can't verify" (yellow), never red. Touched: `src-tauri/src/onedrive.rs`. New test `parses_exactly_one_revision_row`.
 - Verified on macOS: live probe against a real three-canary sync DB now reports "Upload test passed". Windows is unaffected (no canary there).

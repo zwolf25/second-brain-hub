@@ -1633,3 +1633,27 @@ label.transcripts-toggle {
     color: #aaa;
   }
 }
+
+/* Pipeline page */
+.pl-sum { margin-bottom: 0.8em; }
+.pl-title { font-size: 1.05em; font-weight: 600; }
+.pl-feeds { margin: 0.6em 0; color: #555; }
+.pl-q { display: flex; gap: 0.8em; align-items: center; padding: 0.3em 0; border-top: 1px solid #f0f0f0; }
+.pl-q span:first-child { flex: 1; }
+.pl-tabs { display: flex; gap: 1.4em; border-bottom: 1px solid #e5e5e5; margin-top: 0.8em; }
+.pl-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.5em 0; cursor: pointer; color: #777; font: inherit; }
+.pl-tab.on { color: #396cd8; border-color: #396cd8; font-weight: 600; }
+.pl-tab i { font-style: normal; background: #ececec; color: #666; border-radius: 9px; padding: 0 7px; font-size: 0.8em; margin-left: 4px; }
+.pl-row, .pl-vr { display: flex; align-items: center; gap: 0.8em; padding: 0.6em 0; border-top: 1px solid #f0f0f0; }
+.pl-row > div:first-child, .pl-vr > div:nth-child(2) { flex: 1; }
+.pl-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 5px 0 4px; background: #bbb; }
+.pl-dot.stale { background: #d9534f; } .pl-dot.fresh { background: #2f9e5b; }
+.pl-voc { margin-top: 1.2em; border-top: 6px solid #f3f3f3; padding-top: 0.6em; }
+.pl-vh { display: flex; gap: 0.8em; align-items: baseline; }
+.pl-chips { display: flex; gap: 0.5em; flex-wrap: wrap; align-items: center; margin: 0.5em 0; }
+.pl-chip { border: 1px solid #ccc; border-radius: 12px; background: none; padding: 2px 10px; cursor: pointer; color: #555; font: inherit; font-size: 0.85em; }
+.pl-chip.on { background: #396cd8; border-color: #396cd8; color: #fff; }
+.pl-me { margin-left: auto; } .pl-me input { width: 8em; }
+.pl-tag { border-radius: 4px; padding: 0 6px; font-size: 0.8em; background: #eee; color: #555; }
+.pl-tag.loss { background: #fdeaea; color: #a02a2a; } .pl-tag.win { background: #e6f5ec; color: #1e7a45; } .pl-tag.churn { background: #fff3dc; color: #8a5a00; }
+.pl-vr a, .pl-vh + .pl-chips a { color: #777; font-size: 0.85em; text-decoration: underline; cursor: pointer; margin-left: 0.4em; }

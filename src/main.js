@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -15,6 +15,7 @@ const mapView = document.querySelector("#map-view");
 const skillsView = document.querySelector("#skills-view");
 const transcriptsView = document.querySelector("#transcripts-view");
 const onedriveView = document.querySelector("#onedrive-view");
+const pipelineView = document.querySelector("#pipeline-view");
 const onboardingError = document.querySelector("#onboarding-error");
 const searchInput = document.querySelector("#search-input");
 const statusEl = document.querySelector("#status");
@@ -220,8 +221,8 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
-const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView, onedrive: onedriveView };
-const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive" };
+const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView, onedrive: onedriveView, pipeline: pipelineView };
+const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive", pipeline: "Pipeline" };
 let currentView = "search";
 let hasVault = false;
 function showView(name) {
@@ -1886,7 +1887,7 @@ document.querySelector("#search-btn").addEventListener("click", showSearchView);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleMenu(false);
   if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !hasVault) return;
-  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, 5: showOneDriveView, ",": showSettingsView }[e.key];
+  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, 5: showOneDriveView, 6: showPipelineView, ",": showSettingsView }[e.key];
   if (!go || (go === showTranscriptsView && document.querySelector("#transcripts-btn").classList.contains("hidden"))) return;
   e.preventDefault();
   go();
@@ -2090,6 +2091,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   listen("onedrive-status", (event) => renderOneDrive(event.payload));
   invoke("refresh_onedrive_status").then(renderOneDrive).catch(() => {});
   document.querySelector("#onedrive-badge").addEventListener("click", showOneDriveView);
+  document.querySelector("#pipeline-badge").addEventListener("click", showPipelineView);
+  document.querySelector("#pipeline-refresh-btn").addEventListener("click", loadPipeline);
   onedrivePill.addEventListener("click", showOneDriveView);
   document.querySelector("#onedrive-banner-btn").addEventListener("click", showOneDriveView);
   document.querySelector("#onedrive-setting-btn").addEventListener("click", showOneDriveView);
@@ -2227,3 +2230,91 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 });
+
+
+// ---- Pipeline page (reads _status/intel-staleness.json and win-loss/interview-wishlist.md; Run opens Claude) ----
+let plData = null, plTab = "wl", plVocFilter = "all";
+const plClaimName = () => localStorage.getItem("hub-claim-name") || "";
+const plVocKinds = { loss: "loss", win: "win", churn: "churn" };
+
+async function showPipelineView() {
+  showView("pipeline");
+  toggleMenu(false);
+  await loadPipeline();
+}
+
+async function loadPipeline() {
+  plData = await invoke("get_pipeline").catch(() => null);
+  renderPipeline();
+}
+
+function renderPipeline() {
+  const sum = document.querySelector("#pipeline-summary"), rows = document.querySelector("#pipeline-rows");
+  const status = plData?.status_json ? JSON.parse(plData.status_json) : null;
+  if (!status) {
+    sum.innerHTML = `<div class="od-card od-yellow">No pipeline status found. Set the shared vault in Settings, or ask the owner to run the daily status job.</div>`;
+    rows.innerHTML = ""; document.querySelector("#pipeline-tabs").innerHTML = ""; document.querySelector("#voc-box").classList.add("hidden");
+    return;
+  }
+  const ageH = (Date.now() - Date.parse(status.generated)) / 36e5;
+  document.querySelector("#pipeline-generated").textContent = `Updated ${status.generated.slice(0, 16).replace("T", " ")} UTC${ageH > 48 ? " (older than 48 hours, owner may need to check)" : ""}`;
+  const tabs = pipelineTabs(status.outputs);
+  const stale = (k) => tabs[k].filter((o) => o.stale).length;
+  const first = stale("wl") ? "Start with the Win/Loss/Churn report" : stale("pmd") ? "Refresh the stale PMDs" : stale("comp") ? "Refresh the stale competitive cards" : "Everything is current";
+  sum.innerHTML = `<div class="pl-title">${escapeHtml(first)}</div><div class="muted">Then PMDs, then Competitive, in that order.</div>`;
+  document.querySelector("#pipeline-queues").innerHTML = status.queues.map((q) => `<div class="pl-q"><span>${escapeHtml(q.name)}${q.pending ? "" : " · empty"}</span><span class="muted">${q.pending ? `${q.pending} waiting` : ""}</span>${q.pending ? `<button class="topbar-btn" data-run="/${escapeHtml(q.skill)}">Process</button>` : ""}</div>`).join("") + (status.queues_skipped ? `<div class="muted">Some queues are owner machine only.</div>` : "");
+  const labels = { wl: "1 · Win/Loss/Churn", pmd: "2 · PMDs", comp: "3 · Competitive" };
+  document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${stale(k)}</i></button>`).join("");
+  const list = tabs[plTab], need = list.filter((o) => o.stale);
+  const row = (o) => `<div class="pl-row"><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span><div class="muted">${o.new_upstream} new since ${escapeHtml(o.output_date || "unknown")}</div></div>${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div>`;
+  rows.innerHTML = need.map(row).join("") + (list.length > need.length ? `<details class="pl-all"><summary>Show all ${list.length}</summary>${list.filter((o) => !o.stale).map(row).join("")}</details>` : "") || `<div class="muted">Nothing here.</div>`;
+  renderVoc();
+}
+
+function renderVoc() {
+  const box = document.querySelector("#voc-box");
+  const all = plData?.voc ?? [];
+  box.classList.toggle("hidden", plTab !== "wl" || !all.length);
+  if (plTab !== "wl" || !all.length) return;
+  const me = plClaimName();
+  const rows = vocVisible(all, plVocFilter).sort((a, b) => vocPriority(b.amount).n - vocPriority(a.amount).n);
+  const count = (f) => vocVisible(all, f).length;
+  const chip = (f, l) => `<button class="pl-chip ${plVocFilter === f ? "on" : ""}" data-vf="${f}">${l} ${count(f)}</button>`;
+  box.innerHTML = `<div class="pl-vh"><b>VoC backlog</b><span class="muted">${count("all")} candidates · current customers pass the active-customer check first</span></div>
+    <div class="pl-chips">${chip("all", "All")}${chip("loss", "Losses")}${chip("churn", "Churn")}${chip("win", "Wins")}${chip("declined", "Declined")}<span class="muted pl-me">Your name <input id="voc-me" value="${escapeHtml(me)}" placeholder="for Claim"></span></div>
+    ${rows.slice(0, 60).map((r) => {
+      const p = vocPriority(r.amount);
+      const own = r.declined ? `<span class="muted">Declined: ${escapeHtml(r.declined)}</span> <a data-undo="${r.key}">Undo</a>` : r.claimed_by ? `<span>${escapeHtml(r.claimed_by)}</span> <a data-release="${r.key}">Release</a>` : `<button class="topbar-btn" data-claim="${r.key}">Claim</button>`;
+      const act = r.declined ? "" : /requested|scheduled|done/i.test(r.status) ? `<span class="muted">${escapeHtml(r.status)}</span>` : `<button class="topbar-btn" data-req="${r.key}">Request VoC</button> <a data-dismiss="${r.key}">Dismiss</a>`;
+      return `<div class="pl-vr"><span class="pl-tag ${plVocKinds[r.kind]}">${r.kind}</span><div><b>${escapeHtml(r.account)}</b><div class="muted">${escapeHtml(r.amount)} · ${escapeHtml(r.why).slice(0, 110)}</div></div><span>${p.label}</span><div>${own}</div><div>${act}</div></div>`;
+    }).join("")}${rows.length > 60 ? `<div class="muted">Showing the top 60 of ${rows.length} by deal size.</div>` : ""}`;
+}
+
+const VOC_REASONS = ["Already interviewed or covered by a recent VoC", "Not a real buying decision (renewal, add-on, admin close)", "Deal too small to learn from", "No reachable contact or relationship is sensitive", "Other"];
+async function setVocMarker(key, kind, value) {
+  await invoke("set_voc_marker", { key, kind, value }).catch((e) => alert(`Couldn't save: ${e}`));
+  await loadPipeline();
+}
+
+pipelineView.addEventListener("click", (e) => {
+  const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
+  if (d("run")) return launchClaudeCommand(d("run"));
+  if (d("tab")) { plTab = d("tab"); return renderPipeline(); }
+  if (d("vf")) { plVocFilter = d("vf"); return renderVoc(); }
+  const row = (k) => plData.voc.find((r) => r.key === k);
+  if (d("claim")) {
+    const me = document.querySelector("#voc-me")?.value.trim();
+    if (!me) return document.querySelector("#voc-me").focus();
+    localStorage.setItem("hub-claim-name", me);
+    return setVocMarker(d("claim"), "claim", me);
+  }
+  if (d("release")) return setVocMarker(d("release"), "claim", "");
+  if (d("undo")) return setVocMarker(d("undo"), "declined", "");
+  if (d("req")) { const r = row(d("req")); return launchClaudeCommand(`/voc-skills:voc-recruit ${r.account} (closed ${r.date}). After I approve the outreach, set Status = Requested for this row in win-loss/interview-wishlist.md.`); }
+  if (d("dismiss")) {
+    const cell = t.closest(".pl-vr").lastElementChild;
+    cell.innerHTML = `<select data-reason="${d("dismiss")}"><option value="">Why dismiss?</option>${VOC_REASONS.map((x) => `<option>${escapeHtml(x)}</option>`).join("")}</select>`;
+  }
+});
+pipelineView.addEventListener("change", (e) => { const k = e.target.dataset?.reason; if (k && e.target.value) setVocMarker(k, "declined", e.target.value); });
+document.addEventListener("input", (e) => { if (e.target.id === "voc-me") localStorage.setItem("hub-claim-name", e.target.value.trim()); });

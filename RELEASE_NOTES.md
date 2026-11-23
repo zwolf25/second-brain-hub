@@ -1,1 +1,1 @@
-Fixes a false OneDrive alert saying the Hub's test file was never confirmed. If you saw it, it was a bug in the check, not a sync problem.
+New Pipeline page (⌘6) shows which reports, PMDs and battlecards are stale and opens Claude to refresh them. It also lists the VoC interview backlog, where you can claim, request or dismiss a candidate.

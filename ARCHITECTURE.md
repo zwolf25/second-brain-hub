@@ -100,6 +100,9 @@ Implemented entirely in the frontend (`main.js`'s `launchClaudeCommand`) via `op
 
 **Not yet verified on Windows** — same category of gap as the rest of this doc's Windows caveats. `claude://` almost certainly works identically (Claude Desktop ships for both platforms and URL-scheme registration is standard cross-platform practice for Electron-style apps), but hasn't been tested on an actual Windows machine.
 
+### Pipeline page (0.19.0)
+`pipeline.rs`: `get_pipeline` returns `_status/intel-staleness.json` as text plus VoC rows parsed from `win-loss/interview-wishlist.md` (tiers 1, 2, 3, 5; claim and decline state merged from `win-loss/_voc/<key>.claim.json` and `.declined.json`); `set_voc_marker` writes or removes one marker (kind `claim` or `declined`, key validated against path characters). It is the only place the Hub writes into the shared vault. Frontend `showPipelineView` / `renderPipeline` / `renderVoc` in `main.js`; grouping and priority helpers in `lib.js`. Reached from ☰ (⌘6). Run buttons use `launchClaudeCommand`.
+
 ## 7. Logging & crash capture
 
 `tracing` writes to a daily-rotating file under `app_log_dir()/logs/second-brain-search.log.<date>` (confirmed real location on macOS: `~/Library/Logs/com.zackwolf.second-brain-search/logs/`). Files older than 7 days are pruned on each startup. A `std::panic::set_hook` logs any panic (message + location) to the same file before the process dies, so crashes aren't silently lost.

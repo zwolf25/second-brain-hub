@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails } from "./lib.js";
+import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible } from "./lib.js";
 
 test("fuzzyScore: subsequence match, tighter span scores lower, miss is null", () => {
   assert.equal(fuzzyScore("wo", "Work Orders"), 1);
@@ -73,4 +73,26 @@ test("onedriveDetails: lists checks and issues for pasting", () => {
   assert.match(t, /0\.18\.0/);
   assert.match(t, /OK: App/);
   assert.match(t, /\[red\] x: Down/);
+});
+
+test("pipelineTabs: three tabs, stale first, most new evidence first", () => {
+  const o = [
+    { name: "PMD: A", stale: false, new_upstream: 0 }, { name: "PMD: B", stale: true, new_upstream: 2 }, { name: "PMD: C", stale: true, new_upstream: 5 },
+    { name: "Battlecard: X", stale: true, new_upstream: 1 }, { name: "Landscape map", stale: false, new_upstream: 0 }, { name: "Win/Loss/Churn report", stale: true, new_upstream: 9 },
+  ];
+  const t = pipelineTabs(o);
+  assert.deepEqual(t.pmd.map((x) => x.name), ["PMD: C", "PMD: B", "PMD: A"]);
+  assert.equal(t.comp.length, 2);
+  assert.equal(t.wl[0].name, "Win/Loss/Churn report");
+  assert.deepEqual(pipelineTabs(undefined), { wl: [], pmd: [], comp: [] });
+});
+
+test("vocPriority and vocVisible", () => {
+  assert.equal(vocPriority("$380,000").label, "High");
+  assert.equal(vocPriority("$95K").label, "Low"); // text without digits-only amount stays Low: sync writes full dollars
+  assert.equal(vocPriority("$50,000").label, "Med");
+  const rows = [{ kind: "loss", declined: "" }, { kind: "win", declined: "" }, { kind: "loss", declined: "too small" }];
+  assert.equal(vocVisible(rows, "all").length, 2);
+  assert.equal(vocVisible(rows, "loss").length, 1);
+  assert.equal(vocVisible(rows, "declined").length, 1);
 });

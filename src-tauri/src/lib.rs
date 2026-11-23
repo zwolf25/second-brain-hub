@@ -9,6 +9,7 @@ mod graph;
 mod index;
 mod logging;
 mod onedrive;
+mod pipeline;
 mod plugins;
 mod render;
 mod search;
@@ -905,6 +906,17 @@ fn get_vault_graph(state: State<Arc<AppState>>) -> graph::GraphData {
 }
 
 #[tauri::command]
+fn get_pipeline(state: State<Arc<AppState>>) -> Option<pipeline::PipelineData> {
+    shared_root(&state).map(|r| pipeline::load(&r))
+}
+
+#[tauri::command]
+fn set_voc_marker(state: State<Arc<AppState>>, key: String, kind: String, value: String) -> Result<(), String> {
+    let root = shared_root(&state).ok_or("shared vault not set")?;
+    pipeline::set_marker(&root, &key, &kind, &value)
+}
+
+#[tauri::command]
 fn get_link_health(state: State<Arc<AppState>>) -> graph::LinkHealth {
     let vault_path = state.config.lock_recover().vault_path.clone();
     vault_path.map(|p| graph::link_health(&p)).unwrap_or_default()
@@ -1152,6 +1164,8 @@ pub fn run() {
             render_markdown,
             can_edit_markdown,
             get_link_health,
+            get_pipeline,
+            set_voc_marker,
             read_for_edit,
             write_for_edit,
             get_launch_file_path,

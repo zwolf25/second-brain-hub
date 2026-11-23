@@ -87,3 +87,26 @@ export function sortResults(results, sort) {
     return dir * a.updated.localeCompare(b.updated);
   });
 }
+
+// Pipeline page: split the staleness outputs into the three flow-order tabs (stale rows first, most new evidence first).
+export function pipelineTabs(outputs = []) {
+  const tabs = { wl: [], pmd: [], comp: [] };
+  for (const o of outputs) {
+    const t = o.name.startsWith("Win/Loss") ? "wl" : o.name.startsWith("PMD") ? "pmd" : "comp";
+    tabs[t].push(o);
+  }
+  for (const k of Object.keys(tabs)) tabs[k].sort((a, b) => Number(b.stale) - Number(a.stale) || b.new_upstream - a.new_upstream || a.name.localeCompare(b.name));
+  return tabs;
+}
+
+// VoC priority from the deal size in the "$1,234" text: High from 150K, Med from 50K.
+export function vocPriority(amount) {
+  const n = Number(String(amount).replace(/[^0-9.]/g, "")) || 0;
+  return { n, label: n >= 150000 ? "High" : n >= 50000 ? "Med" : "Low" };
+}
+
+// Declined rows hide unless that chip is chosen; other chips filter by kind.
+export function vocVisible(rows, filter) {
+  if (filter === "declined") return rows.filter((r) => r.declined);
+  return rows.filter((r) => !r.declined && (filter === "all" || r.kind === filter));
+}
