@@ -306,11 +306,25 @@ fn pending_count(db: &Path) -> Option<u32> {
     sql(db, q)?.trim().parse().ok()
 }
 
+/// Every collaborator's inbox holds a file with this name, so match on the parent folder too.
 #[cfg(target_os = "macos")]
-fn canary_revision(db: &Path) -> Option<i64> {
-    let q = format!("SELECT eTag FROM od_ClientFile_Records WHERE fileName='{CANARY_NAME}';");
-    let out = sql(db, &q)?;
-    out.trim().trim_matches('"').rsplit(',').next()?.trim_matches('"').parse().ok()
+fn canary_revision(db: &Path, owner: &str) -> Option<i64> {
+    let owner = owner.replace('\'', "''");
+    let q = format!(
+        "SELECT f.eTag FROM od_ClientFile_Records f JOIN od_ClientFolder_Records p ON p.resourceID=f.parentResourceID \
+         WHERE f.fileName='{CANARY_NAME}' AND p.folderName='{owner}';"
+    );
+    parse_revision(&sql(db, &q)?)
+}
+
+/// `"{GUID},190"` -> 190. Anything but exactly one row is ambiguous, so None (reads as "can't verify", never red).
+fn parse_revision(out: &str) -> Option<i64> {
+    let mut rows = out.lines().map(str::trim).filter(|l| !l.is_empty());
+    let row = rows.next()?;
+    if rows.next().is_some() {
+        return None;
+    }
+    row.trim_matches('"').rsplit(',').next()?.parse().ok()
 }
 
 fn dir_nonempty(p: &Path) -> bool {
@@ -331,7 +345,7 @@ fn probe_canary(inbox: Option<&Path>, db: Option<&Path>) -> Canary {
         Some((ts, e)) => (Some(now.saturating_sub(ts)), Some(e)),
         None => (None, None),
     };
-    let current = canary_revision(db);
+    let current = inbox.file_name().and_then(|n| n.to_str()).and_then(|n| canary_revision(db, n));
     let (state, rewrite) = canary_state(age, expected, current);
     if rewrite && inbox.is_dir() {
         let _ = std::fs::write(&file, format!("{now} {}\n", current.unwrap_or(0) + 1));
@@ -459,6 +473,14 @@ mod tests {
         assert_eq!(canary_state(Some(1000), Some(4), Some(4)), (Canary::Ok, true));
         assert_eq!(canary_state(Some(700), Some(4), None), (Canary::Blind, false));
         assert_eq!(canary_state(Some(30), Some(4), None), (Canary::Ok, false)); // too young to judge
+    }
+
+    #[test]
+    fn parses_exactly_one_revision_row() {
+        assert_eq!(parse_revision("\"{504A},190\"\n"), Some(190));
+        assert_eq!(parse_revision(""), None);
+        // several collaborators' canaries -> ambiguous, never picks one
+        assert_eq!(parse_revision("\"{A},190\"\n\"{B},9\"\n\"{C},1\"\n"), None);
     }
 
     #[test]
