@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible } from "./lib.js";
+import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft } from "./lib.js";
 
 test("fuzzyScore: subsequence match, tighter span scores lower, miss is null", () => {
   assert.equal(fuzzyScore("wo", "Work Orders"), 1);
@@ -95,4 +95,44 @@ test("vocPriority and vocVisible", () => {
   assert.equal(vocVisible(rows, "all").length, 2);
   assert.equal(vocVisible(rows, "loss").length, 1);
   assert.equal(vocVisible(rows, "declined").length, 1);
+});
+
+test("vocType ranks new-logo loss > churn > new-logo win > renewal", () => {
+  const T = Date.parse("2026-11-23"), d = "2026-11-10";
+  const mk = (kind, type, acv) => ({ account: `${kind}-${type}`, kind, type, acv, date: d });
+  const order = [mk("loss", "new_logo", 50000), mk("churn", "churn", 50000), mk("win", "new_logo", 50000), mk("win", "renewal", 50000)];
+  const g = vocBuild([...order].reverse(), { today: T, services: true });
+  assert.deepEqual(g.map((x) => vocType(x.best)), ["loss", "churn", "win", "renewal"]);
+});
+
+test("vocBuild groups by account, hides services and declined, searches displayed values, parks claimed", () => {
+  const T = Date.parse("2026-11-23");
+  const rows = [
+    { account: "Walgreens", kind: "win", type: "expansion", acv: 1500000, date: "2026-08-27", csm: "Karm Sanchez", key: "a" },
+    { account: "Walgreens", kind: "win", type: "services", acv: 4000, date: "2026-09-01", key: "b" },
+    { account: "Acme", kind: "loss", type: "new_logo", acv: 40000, date: "2026-11-01", contact: { name: "Lee Park", email: "lee@acme.com" }, key: "c", claimed_by: "Amy" },
+    { account: "Zed", kind: "loss", type: "new_logo", acv: 40000, date: "2026-11-01", key: "d" },
+    { account: "Old", kind: "loss", type: "new_logo", acv: 40000, date: "2026-11-01", key: "e", declined: "small" },
+  ];
+  const all = vocBuild(rows, { today: T });
+  assert.deepEqual(all.map((g) => g.best.account), ["Zed", "Walgreens", "Acme"]);
+  assert.equal(vocBuild(rows, { today: T, services: true }).find((g) => g.best.account === "Walgreens").others.length, 1);
+  assert.equal(all.find((g) => g.best.account === "Walgreens").others.length, 0);
+  assert.deepEqual(vocBuild(rows, { today: T, query: "karm" }).map((g) => g.best.key), ["a"]);
+  assert.deepEqual(vocBuild(rows, { today: T, query: "LEE acme.com" }).map((g) => g.best.key), ["c"]);
+  assert.deepEqual(vocBuild(rows, { today: T, type: "declined" }).map((g) => g.best.key), ["e"]);
+  assert.equal(vocMoney(1500000), "$1.5M");
+  assert.ok(vocScore(rows[2], T) > vocScore({ ...rows[2], acv: 1000 }, T));
+});
+
+test("vocBuild hides completed VoCs and can sort by days left", () => {
+  const T = Date.parse("2026-11-23");
+  const rows = [
+    { account: "Big", kind: "loss", type: "new_logo", acv: 900000, date: "2026-11-20", key: "a" },
+    { account: "Soon", kind: "win", type: "new_logo", acv: 20000, date: "2026-08-30", key: "b" },
+    { account: "Done", kind: "loss", type: "new_logo", acv: 900000, date: "2026-11-20", key: "c", status: "Done" },
+  ];
+  assert.deepEqual(vocBuild(rows, { today: T }).map((g) => g.best.key), ["a", "b"]);
+  assert.deepEqual(vocBuild(rows, { today: T, sort: "days" }).map((g) => g.best.key), ["b", "a"]);
+  assert.equal(vocDaysLeft(rows[1], T), 7);
 });

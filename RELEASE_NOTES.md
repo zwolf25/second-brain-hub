@@ -1,1 +1,1 @@
-New Pipeline page (⌘6) shows which reports, PMDs and battlecards are stale and opens Claude to refresh them. It also lists the VoC interview backlog, where you can claim, request or dismiss a candidate.
+The VoC backlog now ranks new-logo losses, churn and new-logo wins first, shows real deal values, and lets you search and open a row for the rep, CSM, contact and seller notes. Claim uses your own name.

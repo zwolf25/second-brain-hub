@@ -910,6 +910,15 @@ fn get_pipeline(state: State<Arc<AppState>>) -> Option<pipeline::PipelineData> {
     shared_root(&state).map(|r| pipeline::load(&r))
 }
 
+/// Display name from this user's Second Brain roster profile (inbox/_roster/<slug>.md); None means Claim stays disabled.
+#[tauri::command]
+fn get_claim_name() -> Option<String> {
+    let inbox = config::autodetect_inbox()?;
+    let roster = inbox.parent()?.join("_roster").join(format!("{}.md", inbox.file_name()?.to_str()?));
+    let text = std::fs::read_to_string(roster).ok()?;
+    text.lines().find_map(|l| l.strip_prefix("name:")).map(|n| n.trim().trim_matches('"').to_string()).filter(|n| !n.is_empty())
+}
+
 #[tauri::command]
 fn set_voc_marker(state: State<Arc<AppState>>, key: String, kind: String, value: String) -> Result<(), String> {
     let root = shared_root(&state).ok_or("shared vault not set")?;
@@ -1164,7 +1173,7 @@ pub fn run() {
             render_markdown,
             can_edit_markdown,
             get_link_health,
-            get_pipeline,
+            get_pipeline, get_claim_name,
             set_voc_marker,
             read_for_edit,
             write_for_edit,

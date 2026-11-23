@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocDaysLeft, VOC_TYPES } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -2233,9 +2233,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 
 // ---- Pipeline page (reads _status/intel-staleness.json and win-loss/interview-wishlist.md; Run opens Claude) ----
-let plData = null, plTab = "wl", plVocFilter = "all";
-const plClaimName = () => localStorage.getItem("hub-claim-name") || "";
-const plVocKinds = { loss: "loss", win: "win", churn: "churn" };
+let plData = null, plTab = "wl", plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plClaimName = null, plOpen = new Set();
 
 async function showPipelineView() {
   showView("pipeline");
@@ -2244,6 +2242,7 @@ async function showPipelineView() {
 }
 
 async function loadPipeline() {
+  plClaimName = await invoke("get_claim_name").catch(() => null);
   plData = await invoke("get_pipeline").catch(() => null);
   renderPipeline();
 }
@@ -2262,13 +2261,36 @@ function renderPipeline() {
   const stale = (k) => tabs[k].filter((o) => o.stale).length;
   const first = stale("wl") ? "Start with the Win/Loss/Churn report" : stale("pmd") ? "Refresh the stale PMDs" : stale("comp") ? "Refresh the stale competitive cards" : "Everything is current";
   sum.innerHTML = `<div class="pl-title">${escapeHtml(first)}</div><div class="muted">Then PMDs, then Competitive, in that order.</div>`;
+  const waiting = status.queues.reduce((n, q) => n + (q.pending || 0), 0);
+  const qd = document.querySelector("#pipeline-feeds");
+  qd.querySelector("summary").innerHTML = waiting ? `Queues <span class="pl-warn">${waiting} waiting</span>` : "Queues";
+  if (waiting && !qd.dataset.seen) { qd.open = true; qd.dataset.seen = "1"; }
   document.querySelector("#pipeline-queues").innerHTML = status.queues.map((q) => `<div class="pl-q"><span>${escapeHtml(q.name)}${q.pending ? "" : " · empty"}</span><span class="muted">${q.pending ? `${q.pending} waiting` : ""}</span>${q.pending ? `<button class="topbar-btn" data-run="/${escapeHtml(q.skill)}">Process</button>` : ""}</div>`).join("") + (status.queues_skipped ? `<div class="muted">Some queues are owner machine only.</div>` : "");
   const labels = { wl: "1 · Win/Loss/Churn", pmd: "2 · PMDs", comp: "3 · Competitive" };
   document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${stale(k)}</i></button>`).join("");
   const list = tabs[plTab], need = list.filter((o) => o.stale);
-  const row = (o) => `<div class="pl-row"><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span><div class="muted">${o.new_upstream} new since ${escapeHtml(o.output_date || "unknown")}</div></div>${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div>`;
+  const newWhat = { wl: "new win/loss/churn records", pmd: "new stories, NPS responses and win/loss records", comp: "new records about this competitor" }[plTab];
+  const row = (o) => `<div class="pl-row"><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span><div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div>${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div>`;
   rows.innerHTML = need.map(row).join("") + (list.length > need.length ? `<details class="pl-all"><summary>Show all ${list.length}</summary>${list.filter((o) => !o.stale).map(row).join("")}</details>` : "") || `<div class="muted">Nothing here.</div>`;
   renderVoc();
+}
+
+const plDays = (d) => Math.max(0, Math.round((Date.now() - Date.parse(d)) / 864e5));
+const plLines = (pairs) => pairs.filter(([, v]) => v).map(([k, v]) => `<div><span class="muted">${k}</span> ${v}</div>`).join("");
+
+function vocDetail(g) {
+  const r = g.best, c = r.contact;
+  const contact = c && (c.name || c.email) ? [escapeHtml(c.name || ""), escapeHtml(c.title || ""), c.email ? `<a href="mailto:${escapeHtml(c.email)}">${escapeHtml(c.email)}</a>` : ""].filter(Boolean).join(" · ") : `<span class="muted">no contact on file in SFDC</span>`;
+  const others = g.others.map((o) => `${escapeHtml(VOC_TYPES[vocType(o)])} ${vocMoney(vocValue(o))} · ${escapeHtml(o.date)}${o.opp_name ? ` · ${escapeHtml(o.opp_name)}` : ""}`).join("<br>");
+  const money = `${vocMoney(vocValue(r))}${r.acv_source ? ` <span class="muted">(${escapeHtml(r.acv_source)})</span>` : ""}${r.amount_flag ? ` <span class="pl-warn">check SFDC: amount looks wrong</span>` : ""}${r.locations ? ` <span class="muted">${r.locations} locations</span>` : ""}`;
+  return `<div class="pl-detail">${plLines([
+    ["Opportunity", escapeHtml(r.opp_name)], ["Annual value", money],
+    ["Reason code", escapeHtml(r.why)], ["Seller notes", escapeHtml(r.reason_text)],
+    ["Competitor", escapeHtml(r.competitor)],
+    ["Sales rep", escapeHtml(r.sales_rep)], ["CSM", escapeHtml(r.csm)], ["Contact", contact],
+    ["Closed", `${escapeHtml(r.date)} (${plDays(r.date)} days ago; leaves the 92 day window after ${Math.max(0, 92 - plDays(r.date))} more)`],
+    ["Other deals", others],
+  ])}${!r.reason_text && !r.why ? `<div class="muted">No reason recorded in SFDC for this deal.</div>` : ""}</div>`;
 }
 
 function renderVoc() {
@@ -2276,18 +2298,30 @@ function renderVoc() {
   const all = plData?.voc ?? [];
   box.classList.toggle("hidden", plTab !== "wl" || !all.length);
   if (plTab !== "wl" || !all.length) return;
-  const me = plClaimName();
-  const rows = vocVisible(all, plVocFilter).sort((a, b) => vocPriority(b.amount).n - vocPriority(a.amount).n);
-  const count = (f) => vocVisible(all, f).length;
+  const opts = { query: plVocQuery, services: plVocServices, sort: plVocSort };
+  const groups = vocBuild(all, { ...opts, type: plVocFilter });
+  const count = (f) => vocBuild(all, { ...opts, type: f }).length;
+  if (!box.querySelector("#voc-q")) {
+    box.innerHTML = `<div class="pl-vh"><b>VoC backlog</b><span class="muted" id="voc-sub"></span></div>
+      <div class="pl-chips" id="voc-chips"></div>
+      <div class="pl-chips"><input id="voc-q" type="search" placeholder="Search account, rep, CSM, contact, reason, competitor..." value="${escapeHtml(plVocQuery)}"><select id="voc-sort"><option value="priority">Sort: priority</option><option value="days">Sort: days left in window</option></select><label class="muted"><input type="checkbox" id="voc-svc" ${plVocServices ? "checked" : ""}> show services and change orders</label></div>
+      <div id="voc-next"></div><div id="voc-list"></div>`;
+  }
+  box.querySelector("#voc-sub").textContent = `${groups.length} accounts · ordered by type, deal size and time left · current customers pass the active-customer check first`;
   const chip = (f, l) => `<button class="pl-chip ${plVocFilter === f ? "on" : ""}" data-vf="${f}">${l} ${count(f)}</button>`;
-  box.innerHTML = `<div class="pl-vh"><b>VoC backlog</b><span class="muted">${count("all")} candidates · current customers pass the active-customer check first</span></div>
-    <div class="pl-chips">${chip("all", "All")}${chip("loss", "Losses")}${chip("churn", "Churn")}${chip("win", "Wins")}${chip("declined", "Declined")}<span class="muted pl-me">Your name <input id="voc-me" value="${escapeHtml(me)}" placeholder="for Claim"></span></div>
-    ${rows.slice(0, 60).map((r) => {
-      const p = vocPriority(r.amount);
-      const own = r.declined ? `<span class="muted">Declined: ${escapeHtml(r.declined)}</span> <a data-undo="${r.key}">Undo</a>` : r.claimed_by ? `<span>${escapeHtml(r.claimed_by)}</span> <a data-release="${r.key}">Release</a>` : `<button class="topbar-btn" data-claim="${r.key}">Claim</button>`;
-      const act = r.declined ? "" : /requested|scheduled|done/i.test(r.status) ? `<span class="muted">${escapeHtml(r.status)}</span>` : `<button class="topbar-btn" data-req="${r.key}">Request VoC</button> <a data-dismiss="${r.key}">Dismiss</a>`;
-      return `<div class="pl-vr"><span class="pl-tag ${plVocKinds[r.kind]}">${r.kind}</span><div><b>${escapeHtml(r.account)}</b><div class="muted">${escapeHtml(r.amount)} · ${escapeHtml(r.why).slice(0, 110)}</div></div><span>${p.label}</span><div>${own}</div><div>${act}</div></div>`;
-    }).join("")}${rows.length > 60 ? `<div class="muted">Showing the top 60 of ${rows.length} by deal size.</div>` : ""}`;
+  box.querySelector("#voc-chips").innerHTML = chip("all", "All") + Object.entries(VOC_TYPES).filter(([k]) => k !== "services" || plVocServices).map(([k, l]) => chip(k, l)).join("") + chip("declined", "Declined");
+  const top = groups.find((g) => !g.best.claimed_by && !g.best.requested_by);
+  box.querySelector("#voc-next").innerHTML = top && !plVocQuery ? `<div class="pl-next" data-open="${top.best.key}"><b>Next up:</b> ${escapeHtml(top.best.account)} · ${escapeHtml(VOC_TYPES[vocType(top.best)])} · ${vocMoney(vocValue(top.best))} · ${vocDaysLeft(top.best)} days left in the window</div>` : "";
+  const canClaim = !!plClaimName;
+  box.querySelector("#voc-list").innerHTML = groups.slice(0, 60).map((g) => {
+    const r = g.best, t = vocType(r), open = plOpen.has(r.key);
+    const own = r.declined ? `<span class="muted">Declined: ${escapeHtml(r.declined)}</span> <a data-undo="${r.key}">Undo</a>`
+      : r.claimed_by ? `<span>${escapeHtml(r.claimed_by)}</span> ${r.claimed_by === plClaimName ? `<a data-release="${r.key}">Release</a>` : ""}`
+      : canClaim ? `<button class="topbar-btn" data-claim="${r.key}">Claim as ${escapeHtml(plClaimName)}</button>` : `<button class="topbar-btn" disabled title="No Second Brain inbox found for you, so Claim is off. Run onboarding to get one.">Claim</button>`;
+    const act = r.declined ? "" : r.requested_by || /requested|scheduled|done/i.test(r.status) ? `<span class="muted">Requested${r.requested_by ? ` by ${escapeHtml(r.requested_by)}` : ""}</span>` : `<button class="topbar-btn" data-req="${r.key}">Request VoC</button> <a data-dismiss="${r.key}">Dismiss</a>`;
+    const badges = `${r.current_customer ? `<span class="pl-gate" title="Run the active-customer gate before any outreach">current customer: gate first</span>` : ""}${r.amount_flag ? `<span class="pl-warn" title="${escapeHtml(r.acv_source)}">amount?</span>` : ""}${g.others.length ? `<span class="muted">+${g.others.length} more deal${g.others.length > 1 ? "s" : ""}</span>` : ""}`;
+    return `<div class="pl-vrow"><div class="pl-vr"><span class="pl-tag ${t}">${escapeHtml(VOC_TYPES[t])}</span><div data-open="${r.key}" class="pl-vmain"><b>${open ? "▾" : "▸"} ${escapeHtml(r.account)}</b> ${badges}<div class="muted">${vocMoney(vocValue(r))} · ${escapeHtml(r.date)} · ${escapeHtml((r.why || r.reason_text || "no reason recorded").slice(0, 110))}</div></div><div>${own}</div><div>${act}</div></div>${open ? vocDetail(g) : ""}</div>`;
+  }).join("") + (groups.length > 60 ? `<div class="muted">Showing the top 60 of ${groups.length}. Search to narrow.</div>` : "") || `<div class="muted">No candidates match.</div>`;
 }
 
 const VOC_REASONS = ["Already interviewed or covered by a recent VoC", "Not a real buying decision (renewal, add-on, admin close)", "Deal too small to learn from", "No reachable contact or relationship is sensitive", "Other"];
@@ -2302,19 +2336,24 @@ pipelineView.addEventListener("click", (e) => {
   if (d("tab")) { plTab = d("tab"); return renderPipeline(); }
   if (d("vf")) { plVocFilter = d("vf"); return renderVoc(); }
   const row = (k) => plData.voc.find((r) => r.key === k);
-  if (d("claim")) {
-    const me = document.querySelector("#voc-me")?.value.trim();
-    if (!me) return document.querySelector("#voc-me").focus();
-    localStorage.setItem("hub-claim-name", me);
-    return setVocMarker(d("claim"), "claim", me);
-  }
+  if (d("open")) { const k = d("open"); plOpen.has(k) ? plOpen.delete(k) : plOpen.add(k); return renderVoc(); }
+  if (d("claim")) return plClaimName && setVocMarker(d("claim"), "claim", plClaimName);
   if (d("release")) return setVocMarker(d("release"), "claim", "");
   if (d("undo")) return setVocMarker(d("undo"), "declined", "");
-  if (d("req")) { const r = row(d("req")); return launchClaudeCommand(`/voc-skills:voc-recruit ${r.account} (closed ${r.date}). After I approve the outreach, set Status = Requested for this row in win-loss/interview-wishlist.md.`); }
+  if (d("req")) {
+    const r = row(d("req"));
+    const gate = r.current_customer ? "This is a current customer: run the active-customer gate (churn/shared/active-customer-gate.md) first and stop if it blocks. " : "";
+    if (plClaimName) invoke("set_voc_marker", { key: r.key, kind: "requested", value: plClaimName }).then(loadPipeline).catch(() => {});
+    return launchClaudeCommand(`/voc-skills:voc-recruit ${r.account} (closed ${r.date}, ${vocType(r)}, ${vocMoney(vocValue(r))}). ${gate}Sales rep: ${r.sales_rep || "unknown"}. CSM: ${r.csm || "unknown"}. Contact: ${r.contact?.name || "none on file"}.`);
+  }
   if (d("dismiss")) {
     const cell = t.closest(".pl-vr").lastElementChild;
     cell.innerHTML = `<select data-reason="${d("dismiss")}"><option value="">Why dismiss?</option>${VOC_REASONS.map((x) => `<option>${escapeHtml(x)}</option>`).join("")}</select>`;
   }
 });
 pipelineView.addEventListener("change", (e) => { const k = e.target.dataset?.reason; if (k && e.target.value) setVocMarker(k, "declined", e.target.value); });
-document.addEventListener("input", (e) => { if (e.target.id === "voc-me") localStorage.setItem("hub-claim-name", e.target.value.trim()); });
+pipelineView.addEventListener("input", (e) => {
+  if (e.target.id === "voc-q") { plVocQuery = e.target.value; renderVoc(); }
+  if (e.target.id === "voc-sort") { plVocSort = e.target.value; renderVoc(); }
+  if (e.target.id === "voc-svc") { plVocServices = e.target.checked; if (!plVocServices && plVocFilter === "services") plVocFilter = "all"; renderVoc(); }
+});

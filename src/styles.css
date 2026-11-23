@@ -1657,3 +1657,14 @@ label.transcripts-toggle {
 .pl-tag { border-radius: 4px; padding: 0 6px; font-size: 0.8em; background: #eee; color: #555; }
 .pl-tag.loss { background: #fdeaea; color: #a02a2a; } .pl-tag.win { background: #e6f5ec; color: #1e7a45; } .pl-tag.churn { background: #fff3dc; color: #8a5a00; }
 .pl-vr a, .pl-vh + .pl-chips a { color: #777; font-size: 0.85em; text-decoration: underline; cursor: pointer; margin-left: 0.4em; }
+
+.pl-vrow { border-top: 1px solid #f0f0f0; } .pl-vrow .pl-vr { border-top: 0; }
+.pl-vmain { cursor: pointer; }
+.pl-detail { margin: 0 0 0.7em 6.5em; padding: 0.5em 0.8em; background: #f7f8fa; border-radius: 6px; font-size: 0.9em; display: grid; gap: 0.25em; }
+.pl-detail > div > .muted { display: inline-block; min-width: 7em; }
+.pl-warn { background: #fff3dc; color: #8a5a00; border-radius: 4px; padding: 0 6px; font-size: 0.8em; margin-left: 0.4em; }
+.pl-gate { background: #fdeaea; color: #a02a2a; border-radius: 4px; padding: 0 6px; font-size: 0.8em; margin-left: 0.4em; }
+.pl-tag.expansion, .pl-tag.renewal, .pl-tag.services { background: #eceef2; color: #555; }
+#voc-q { flex: 1; min-width: 14em; padding: 4px 8px; }
+.pl-next { background: #eef3ff; border-radius: 6px; padding: 0.5em 0.8em; margin: 0.5em 0; cursor: pointer; }
+#voc-sort { padding: 3px 6px; }

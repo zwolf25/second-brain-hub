@@ -1,20 +1,96 @@
 //! Pipeline page data: the staleness JSON (passed through as text) and the VoC backlog.
 //! The backlog is parsed from `win-loss/interview-wishlist.md`; Claim and Dismiss state lives in one small
 //! marker file per candidate under `win-loss/_voc/` (owner decision 2026-11-23: the Hub writes these markers).
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Contact {
+    pub name: Option<String>,
+    pub title: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct VocRow {
     pub key: String,
     pub kind: String, // loss | win | churn
+    #[serde(rename = "type")]
+    pub vtype: String, // new_logo | renewal | expansion | services | churn; empty for rows only in the wishlist
     pub account: String,
     pub date: String,
     pub amount: String,
     pub why: String,
     pub status: String,
     pub claimed_by: String,
+    pub requested_by: String,
     pub declined: String,
+    // detail from win-loss/voc-candidates.json (owner sync); empty for wishlist-only rows
+    pub opp_name: String,
+    pub acv: Option<f64>,
+    pub acv_source: String,
+    pub amount_flag: bool,
+    pub locations: Option<f64>,
+    pub reason_text: String,
+    pub competitor: String,
+    pub sales_rep: String,
+    pub csm: String,
+    pub contact: Option<Contact>,
+    pub current_customer: bool,
+}
+
+/// One row of `win-loss/voc-candidates.json` (written by the owner's SFDC sync).
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Cand {
+    key: String,
+    kind: String,
+    #[serde(rename = "type")]
+    vtype: String,
+    account: String,
+    closed: String,
+    opp_name: Option<String>,
+    acv: Option<f64>,
+    acv_source: Option<String>,
+    amount_flag: bool,
+    locations: Option<f64>,
+    reason_code: Option<String>,
+    reason_text: Option<String>,
+    competitor: Option<String>,
+    sales_rep: Option<String>,
+    csm: Option<String>,
+    contact: Option<Contact>,
+    current_customer: bool,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Sidecar {
+    rows: Vec<Cand>,
+}
+
+fn row_from(c: Cand) -> VocRow {
+    VocRow {
+        key: c.key,
+        kind: c.kind,
+        vtype: c.vtype,
+        account: c.account,
+        date: c.closed,
+        amount: c.acv.map(|a| format!("${a:.0}")).unwrap_or_default(),
+        why: c.reason_code.unwrap_or_default(),
+        opp_name: c.opp_name.unwrap_or_default(),
+        acv: c.acv,
+        acv_source: c.acv_source.unwrap_or_default(),
+        amount_flag: c.amount_flag,
+        locations: c.locations,
+        reason_text: c.reason_text.unwrap_or_default(),
+        competitor: c.competitor.unwrap_or_default(),
+        sales_rep: c.sales_rep.unwrap_or_default(),
+        csm: c.csm.unwrap_or_default(),
+        contact: c.contact,
+        current_customer: c.current_customer,
+        ..Default::default()
+    }
 }
 
 #[derive(Serialize)]
@@ -93,8 +169,7 @@ pub fn parse_wishlist(text: &str) -> Vec<VocRow> {
             amount: col(&["Amount", "ARR"]),
             why: col(&["What the seller view says", "Why", "CSM reason", "Gate"]),
             status: col(&["Status"]),
-            claimed_by: String::new(),
-            declined: String::new(),
+            ..Default::default()
         });
     }
     rows
@@ -110,20 +185,32 @@ fn marker_field(path: &Path, field: &str) -> String {
 
 pub fn load(root: &Path) -> PipelineData {
     let status_json = std::fs::read_to_string(root.join("_status").join("intel-staleness.json")).ok();
-    let mut voc = std::fs::read_to_string(root.join("win-loss").join("interview-wishlist.md"))
+    let wishlist = std::fs::read_to_string(root.join("win-loss").join("interview-wishlist.md"))
         .map(|t| parse_wishlist(&t))
         .unwrap_or_default();
+    let side: Sidecar = std::fs::read_to_string(root.join("win-loss").join("voc-candidates.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    // The sidecar is richer and its amounts are sanity-checked, so it wins; wishlist rows add churn and hand-written entries.
+    let mut voc: Vec<VocRow> = side.rows.into_iter().map(row_from).collect();
+    for r in &mut voc {
+        r.status = wishlist.iter().find(|w| w.key == r.key).map(|w| w.status.clone()).unwrap_or_default();
+    }
+    let have: std::collections::HashSet<String> = voc.iter().map(|r| r.key.clone()).collect();
+    voc.extend(wishlist.into_iter().filter(|w| !have.contains(&w.key)));
     let dir = root.join("win-loss").join("_voc");
     for r in &mut voc {
         r.claimed_by = marker_field(&dir.join(format!("{}.claim.json", r.key)), "by");
+        r.requested_by = marker_field(&dir.join(format!("{}.requested.json", r.key)), "by");
         r.declined = marker_field(&dir.join(format!("{}.declined.json", r.key)), "reason");
     }
     PipelineData { status_json, voc }
 }
 
-/// kind: "claim" | "declined"; `value` empty removes the marker (Release / Undo).
+/// kind: "claim" | "requested" | "declined"; `value` empty removes the marker (Release / Undo).
 pub fn set_marker(root: &Path, key: &str, kind: &str, value: &str) -> Result<(), String> {
-    if !matches!(kind, "claim" | "declined") || key.is_empty() || key.contains(['/', '\\', '.']) {
+    if !matches!(kind, "claim" | "requested" | "declined") || key.is_empty() || key.contains(['/', '\\', '.']) {
         return Err("bad marker".into());
     }
     let dir = root.join("win-loss").join("_voc");
@@ -133,7 +220,7 @@ pub fn set_marker(root: &Path, key: &str, kind: &str, value: &str) -> Result<(),
         return Ok(());
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let field = if kind == "claim" { "by" } else { "reason" };
+    let field = if kind == "declined" { "reason" } else { "by" };
     let body = serde_json::json!({ field: value, "at": chrono_now() });
     std::fs::write(&path, body.to_string()).map_err(|e| e.to_string())
 }
@@ -171,6 +258,24 @@ mod tests {
         set_marker(&d, "urban-barn-2026-09-22", "claim", "").unwrap();
         assert_eq!(load(&d).voc[0].claimed_by, "");
         assert!(set_marker(&d, "../x", "claim", "a").is_err());
+        set_marker(&d, "urban-barn-2026-09-22", "requested", "Amy").unwrap();
+        assert_eq!(load(&d).voc[0].requested_by, "Amy");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sidecar_rows_win_over_wishlist_and_keep_status() {
+        let d = std::env::temp_dir().join(format!("hub-voc-side-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("win-loss")).unwrap();
+        std::fs::write(d.join("win-loss/interview-wishlist.md"), SAMPLE).unwrap();
+        let side = r#"{"rows":[{"key":"urban-barn-2026-09-22","kind":"loss","type":"new_logo","account":"Urban Barn","closed":"2026-09-22",
+            "acv":42000,"acv_source":"opportunity amount","reason_code":"Sales","csm":"Pat","contact":{"name":"Lee","title":"VP","email":"l@x.com"}}]}"#;
+        std::fs::write(d.join("win-loss/voc-candidates.json"), side).unwrap();
+        let p = load(&d);
+        assert_eq!(p.voc.len(), 2); // Urban Barn from the sidecar, Acme (tier 5) still from the wishlist
+        assert_eq!((p.voc[0].vtype.as_str(), p.voc[0].csm.as_str(), p.voc[0].status.as_str()), ("new_logo", "Pat", "Open"));
+        assert_eq!(p.voc[0].contact.as_ref().unwrap().email.as_deref(), Some("l@x.com"));
+        assert_eq!(p.voc[1].account, "Acme Co.");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

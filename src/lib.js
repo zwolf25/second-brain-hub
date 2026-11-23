@@ -110,3 +110,58 @@ export function vocVisible(rows, filter) {
   if (filter === "declined") return rows.filter((r) => r.declined);
   return rows.filter((r) => !r.declined && (filter === "all" || r.kind === filter));
 }
+
+// ---- VoC ordering (0.20.0): type first (new-logo loss > churn > new-logo win > expansion > renewal > services), then deal size, then recency
+export const VOC_TYPES = { loss: "New-logo loss", churn: "Churn", win: "New-logo win", expansion: "Expansion", renewal: "Renewal", services: "Services" };
+const TYPE_RANK = { loss: 100, churn: 80, win: 60, expansion: 40, renewal: 20, services: 5 };
+export function vocType(r) {
+  if (r.kind === "churn") return "churn";
+  const t = r.type || "new_logo";
+  if (t === "new_logo") return r.kind === "loss" ? "loss" : "win";
+  return t in TYPE_RANK ? t : "expansion";
+}
+export function vocValue(r) {
+  return typeof r.acv === "number" ? r.acv : vocPriority(r.amount).n;
+}
+export function vocMoney(n) {
+  if (!n) return "no amount";
+  return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n)}`;
+}
+export function vocDaysLeft(r, today = Date.now(), windowDays = 92) {
+  return Math.max(0, Math.round(windowDays - (today - Date.parse(r.date)) / 864e5));
+}
+export function vocScore(r, today = Date.now(), windowDays = 92) {
+  const v = Math.min(Math.max(vocValue(r), 1000), 1e6);
+  const value = ((Math.log10(v) - 3) / 3) * 30;
+  const age = (today - Date.parse(r.date)) / 864e5;
+  const left = windowDays - (Number.isFinite(age) ? age : 0);
+  const recency = left <= 30 ? Math.min(10, ((30 - Math.max(left, 0)) / 30) * 10) : 0;
+  return TYPE_RANK[vocType(r)] + value + recency;
+}
+function vocHay(r) {
+  const c = r.contact || {};
+  return [r.account, r.opp_name, VOC_TYPES[vocType(r)], r.why, r.reason_text, r.competitor, r.sales_rep, r.csm, c.name, c.title, c.email, r.date, r.amount, vocMoney(vocValue(r)), r.claimed_by, r.requested_by, r.status]
+    .filter(Boolean).join(" ").toLowerCase();
+}
+/** One entry per account: best candidate in `best`, the account's other deals in `others`. */
+export function vocBuild(rows, { type = "all", query = "", services = false, sort = "priority", today = Date.now() } = {}) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const pool = rows.filter((r) => (type === "declined" ? r.declined : !r.declined && !/^(done|completed)/i.test(r.status || ""))
+    && (services || type === "services" || vocType(r) !== "services")
+    && (type === "all" || type === "declined" || vocType(r) === type));
+  const byAcct = new Map();
+  for (const r of pool) {
+    const k = r.account.toLowerCase();
+    if (!byAcct.has(k)) byAcct.set(k, []);
+    byAcct.get(k).push(r);
+  }
+  const groups = [];
+  for (const list of byAcct.values()) {
+    list.sort((a, b) => vocScore(b, today) - vocScore(a, today));
+    const hay = list.map(vocHay).join(" ");
+    if (terms.every((t) => hay.includes(t))) groups.push({ best: list[0], others: list.slice(1), score: vocScore(list[0], today) });
+  }
+  const parked = (g) => (g.best.claimed_by || g.best.requested_by ? 1 : 0);
+  const by = sort === "days" ? (a, b) => vocDaysLeft(a.best, today) - vocDaysLeft(b.best, today) : (a, b) => b.score - a.score;
+  return groups.sort((a, b) => parked(a) - parked(b) || by(a, b));
+}
