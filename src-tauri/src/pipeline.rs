@@ -30,6 +30,8 @@ pub struct VocRow {
     pub acv: Option<f64>,
     pub acv_source: String,
     pub amount_flag: bool,
+    pub raw_amount: Option<f64>,
+    pub sfdc_url: String,
     pub locations: Option<f64>,
     pub reason_text: String,
     pub competitor: String,
@@ -53,6 +55,8 @@ struct Cand {
     acv: Option<f64>,
     acv_source: Option<String>,
     amount_flag: bool,
+    amount: Option<f64>,
+    sfdc_url: Option<String>,
     locations: Option<f64>,
     reason_code: Option<String>,
     reason_text: Option<String>,
@@ -82,6 +86,8 @@ fn row_from(c: Cand) -> VocRow {
         acv: c.acv,
         acv_source: c.acv_source.unwrap_or_default(),
         amount_flag: c.amount_flag,
+        raw_amount: c.amount,
+        sfdc_url: c.sfdc_url.unwrap_or_default(),
         locations: c.locations,
         reason_text: c.reason_text.unwrap_or_default(),
         competitor: c.competitor.unwrap_or_default(),
@@ -167,7 +173,10 @@ pub fn parse_wishlist(text: &str) -> Vec<VocRow> {
             account,
             date,
             amount: col(&["Amount", "ARR"]),
-            why: col(&["What the seller view says", "Why", "CSM reason", "Gate"]),
+            why: match col(&["Gate"]) {
+                g if !g.is_empty() => format!("Current customer, active-customer gate: {g}"),
+                _ => col(&["What the seller view says", "Why", "CSM reason"]),
+            },
             status: col(&["Status"]),
             ..Default::default()
         });
@@ -182,6 +191,9 @@ fn marker_field(path: &Path, field: &str) -> String {
         .and_then(|v| v.get(field).and_then(|f| f.as_str().map(String::from)))
         .unwrap_or_default()
 }
+
+/// Loss reasons with nothing to learn from an interview (owner decision 2026-11-23).
+const AUTO_DECLINE: [&str; 2] = ["Prospect Went Dark", "Timing"];
 
 pub fn load(root: &Path) -> PipelineData {
     let status_json = std::fs::read_to_string(root.join("_status").join("intel-staleness.json")).ok();
@@ -204,6 +216,9 @@ pub fn load(root: &Path) -> PipelineData {
         r.claimed_by = marker_field(&dir.join(format!("{}.claim.json", r.key)), "by");
         r.requested_by = marker_field(&dir.join(format!("{}.requested.json", r.key)), "by");
         r.declined = marker_field(&dir.join(format!("{}.declined.json", r.key)), "reason");
+        if r.declined.is_empty() && AUTO_DECLINE.contains(&r.why.as_str()) {
+            r.declined = format!("Auto: {}", r.why); // derived, no marker file; Hub hides Undo for these
+        }
     }
     PipelineData { status_json, voc }
 }
@@ -276,6 +291,11 @@ mod tests {
         assert_eq!((p.voc[0].vtype.as_str(), p.voc[0].csm.as_str(), p.voc[0].status.as_str()), ("new_logo", "Pat", "Open"));
         assert_eq!(p.voc[0].contact.as_ref().unwrap().email.as_deref(), Some("l@x.com"));
         assert_eq!(p.voc[1].account, "Acme Co.");
+        let side2 = r#"{"rows":[{"key":"k-2026-10-01","kind":"loss","type":"new_logo","account":"K","closed":"2026-10-01","reason_code":"Timing","amount":9000000,"amount_flag":true,"sfdc_url":"https://x/o"}]}"#;
+        std::fs::write(d.join("win-loss/voc-candidates.json"), side2).unwrap();
+        let p2 = load(&d);
+        assert_eq!(p2.voc[0].declined, "Auto: Timing");
+        assert_eq!((p2.voc[0].raw_amount, p2.voc[0].sfdc_url.as_str()), (Some(9000000.0), "https://x/o"));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

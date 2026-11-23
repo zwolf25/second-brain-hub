@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocDaysLeft, VOC_TYPES } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, vocDaysLeft, VOC_TYPES } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -2276,19 +2276,20 @@ function renderPipeline() {
 }
 
 const plDays = (d) => Math.max(0, Math.round((Date.now() - Date.parse(d)) / 864e5));
-const plLines = (pairs) => pairs.filter(([, v]) => v).map(([k, v]) => `<div><span class="muted">${k}</span> ${v}</div>`).join("");
+const plLines = (pairs) => pairs.filter(([, v]) => v).map(([k, v]) => `<span class="muted">${k}</span><div class="pl-dv">${v}</div>`).join("");
 
 function vocDetail(g) {
   const r = g.best, c = r.contact;
   const contact = c && (c.name || c.email) ? [escapeHtml(c.name || ""), escapeHtml(c.title || ""), c.email ? `<a href="mailto:${escapeHtml(c.email)}">${escapeHtml(c.email)}</a>` : ""].filter(Boolean).join(" · ") : `<span class="muted">no contact on file in SFDC</span>`;
-  const others = g.others.map((o) => `${escapeHtml(VOC_TYPES[vocType(o)])} ${vocMoney(vocValue(o))} · ${escapeHtml(o.date)}${o.opp_name ? ` · ${escapeHtml(o.opp_name)}` : ""}`).join("<br>");
-  const money = `${vocMoney(vocValue(r))}${r.acv_source ? ` <span class="muted">(${escapeHtml(r.acv_source)})</span>` : ""}${r.amount_flag ? ` <span class="pl-warn">check SFDC: amount looks wrong</span>` : ""}${r.locations ? ` <span class="muted">${r.locations} locations</span>` : ""}`;
+  const others = g.others.map((o) => `${escapeHtml(VOC_TYPES[vocType(o)])} ${vocShown(o)} · ${escapeHtml(o.date)}${o.opp_name ? ` · ${escapeHtml(o.opp_name)}` : ""}`).join("<br>");
+  const money = `${vocShown(r)}${r.acv_source && typeof r.acv === "number" ? ` <span class="muted">(${escapeHtml(r.acv_source)})</span>` : ""}${r.amount_flag && r.raw_amount ? ` <span class="muted">SFDC amount field says ${vocMoney(r.raw_amount)}, which looks wrong; check the opportunity</span>` : ""}${r.locations ? ` <span class="muted">${r.locations} locations</span>` : ""}`;
   return `<div class="pl-detail">${plLines([
-    ["Opportunity", escapeHtml(r.opp_name)], ["Annual value", money],
+    ["Opportunity", `${escapeHtml(r.opp_name)}${r.sfdc_url ? ` <a data-ext="${escapeHtml(r.sfdc_url)}">Open in Salesforce</a>` : ""}`], ["Annual value", money],
     ["Reason code", escapeHtml(r.why)], ["Seller notes", escapeHtml(r.reason_text)],
     ["Competitor", escapeHtml(r.competitor)],
     ["Sales rep", escapeHtml(r.sales_rep)], ["CSM", escapeHtml(r.csm)], ["Contact", contact],
-    ["Closed", `${escapeHtml(r.date)} (${plDays(r.date)} days ago; leaves the 92 day window after ${Math.max(0, 92 - plDays(r.date))} more)`],
+    ["Customer", r.current_customer ? "Current customer: run the active-customer gate before any outreach" : ""],
+    ["Closed", `${escapeHtml(r.date)} (${plDays(r.date)} days ago; leaves the 90 day window in ${Math.max(0, 90 - plDays(r.date))} days)`],
     ["Other deals", others],
   ])}${!r.reason_text && !r.why ? `<div class="muted">No reason recorded in SFDC for this deal.</div>` : ""}</div>`;
 }
@@ -2307,24 +2308,24 @@ function renderVoc() {
       <div class="pl-chips"><input id="voc-q" type="search" placeholder="Search account, rep, CSM, contact, reason, competitor..." value="${escapeHtml(plVocQuery)}"><select id="voc-sort"><option value="priority">Sort: priority</option><option value="days">Sort: days left in window</option></select><label class="muted"><input type="checkbox" id="voc-svc" ${plVocServices ? "checked" : ""}> show services and change orders</label></div>
       <div id="voc-next"></div><div id="voc-list"></div>`;
   }
-  box.querySelector("#voc-sub").textContent = `${groups.length} accounts · ordered by type, deal size and time left · current customers pass the active-customer check first`;
+  box.querySelector("#voc-sub").textContent = `${groups.length} accounts · ordered by type, deal size and time left · auto-declined: Prospect Went Dark, Timing · rows for current customers need the active-customer gate before outreach`;
   const chip = (f, l) => `<button class="pl-chip ${plVocFilter === f ? "on" : ""}" data-vf="${f}">${l} ${count(f)}</button>`;
-  box.querySelector("#voc-chips").innerHTML = chip("all", "All") + Object.entries(VOC_TYPES).filter(([k]) => k !== "services" || plVocServices).map(([k, l]) => chip(k, l)).join("") + chip("declined", "Declined");
+  box.querySelector("#voc-chips").innerHTML = chip("all", "All") + Object.entries(VOC_TYPES).filter(([k]) => k !== "services" || plVocServices).map(([k, l]) => chip(k, l)).join("") + chip("claimed", "Claimed") + chip("declined", "Declined");
   const top = groups.find((g) => !g.best.claimed_by && !g.best.requested_by);
-  box.querySelector("#voc-next").innerHTML = top && !plVocQuery ? `<div class="pl-next" data-open="${top.best.key}"><b>Next up:</b> ${escapeHtml(top.best.account)} · ${escapeHtml(VOC_TYPES[vocType(top.best)])} · ${vocMoney(vocValue(top.best))} · ${vocDaysLeft(top.best)} days left in the window</div>` : "";
+  box.querySelector("#voc-next").innerHTML = top && !plVocQuery ? `<div class="pl-next" data-open="${top.best.key}"><b>Next up:</b> ${escapeHtml(top.best.account)} · ${escapeHtml(VOC_TYPES[vocType(top.best)])} · ${vocShown(top.best)} · ${vocDaysLeft(top.best)} days left in the window</div>` : "";
   const canClaim = !!plClaimName;
   box.querySelector("#voc-list").innerHTML = groups.slice(0, 60).map((g) => {
     const r = g.best, t = vocType(r), open = plOpen.has(r.key);
-    const own = r.declined ? `<span class="muted">Declined: ${escapeHtml(r.declined)}</span> <a data-undo="${r.key}">Undo</a>`
-      : r.claimed_by ? `<span>${escapeHtml(r.claimed_by)}</span> ${r.claimed_by === plClaimName ? `<a data-release="${r.key}">Release</a>` : ""}`
-      : canClaim ? `<button class="topbar-btn" data-claim="${r.key}">Claim as ${escapeHtml(plClaimName)}</button>` : `<button class="topbar-btn" disabled title="No Second Brain inbox found for you, so Claim is off. Run onboarding to get one.">Claim</button>`;
-    const act = r.declined ? "" : r.requested_by || /requested|scheduled|done/i.test(r.status) ? `<span class="muted">Requested${r.requested_by ? ` by ${escapeHtml(r.requested_by)}` : ""}</span>` : `<button class="topbar-btn" data-req="${r.key}">Request VoC</button> <a data-dismiss="${r.key}">Dismiss</a>`;
-    const badges = `${r.current_customer ? `<span class="pl-gate" title="Run the active-customer gate before any outreach">current customer: gate first</span>` : ""}${r.amount_flag ? `<span class="pl-warn" title="${escapeHtml(r.acv_source)}">amount?</span>` : ""}${g.others.length ? `<span class="muted">+${g.others.length} more deal${g.others.length > 1 ? "s" : ""}</span>` : ""}`;
-    return `<div class="pl-vrow"><div class="pl-vr"><span class="pl-tag ${t}">${escapeHtml(VOC_TYPES[t])}</span><div data-open="${r.key}" class="pl-vmain"><b>${open ? "▾" : "▸"} ${escapeHtml(r.account)}</b> ${badges}<div class="muted">${vocMoney(vocValue(r))} · ${escapeHtml(r.date)} · ${escapeHtml((r.why || r.reason_text || "no reason recorded").slice(0, 110))}</div></div><div>${own}</div><div>${act}</div></div>${open ? vocDetail(g) : ""}</div>`;
+    const own = r.declined ? `<span class="muted">Declined: ${escapeHtml(r.declined)}</span> ${r.declined.startsWith("Auto:") ? "" : `<a data-undo="${r.key}">Undo</a>`}`
+      : r.claimed_by ? `<span>${escapeHtml(r.claimed_by)}</span> <a data-release="${r.key}">Release</a>`
+      : canClaim ? `<button class="topbar-btn" data-claim="${r.key}">Claim</button>` : `<button class="topbar-btn" disabled title="No Second Brain inbox found for you, so Claim is off. Run onboarding to get one.">Claim</button>`;
+    const act = r.declined ? "" : r.requested_by || /requested|scheduled|done/i.test(r.status) ? `<span class="muted">Requested${r.requested_by ? ` by ${escapeHtml(r.requested_by)}` : ""}</span> ${r.requested_by ? `<a data-unreq="${r.key}">Clear</a>` : ""}` : `<button class="topbar-btn" data-req="${r.key}">Request VoC</button> <a data-dismiss="${r.key}">Dismiss</a>`;
+    const badges = `${g.others.length ? `<span class="muted">+${g.others.length} more deal${g.others.length > 1 ? "s" : ""}</span>` : ""}`;
+    return `<div class="pl-vrow"><div class="pl-vr"><span class="pl-tag ${t}">${escapeHtml(VOC_TYPES[t])}</span><div data-open="${r.key}" class="pl-vmain"><b>${open ? "▾" : "▸"} ${escapeHtml(r.account)}</b> ${badges}<div class="muted">${vocShown(r)} · ${escapeHtml(r.date)} · ${escapeHtml((r.why || r.reason_text || "no reason recorded").slice(0, 110))}</div></div><div>${own}</div><div>${act}</div></div>${open ? vocDetail(g) : ""}</div>`;
   }).join("") + (groups.length > 60 ? `<div class="muted">Showing the top 60 of ${groups.length}. Search to narrow.</div>` : "") || `<div class="muted">No candidates match.</div>`;
 }
 
-const VOC_REASONS = ["Already interviewed or covered by a recent VoC", "Not a real buying decision (renewal, add-on, admin close)", "Deal too small to learn from", "No reachable contact or relationship is sensitive", "Other"];
+const VOC_REASONS = ["Already covered by a VoC", "Not a real buying decision", "Deal too small", "No contact or too sensitive", "Other"];
 async function setVocMarker(key, kind, value) {
   await invoke("set_voc_marker", { key, kind, value }).catch((e) => alert(`Couldn't save: ${e}`));
   await loadPipeline();
@@ -2332,6 +2333,9 @@ async function setVocMarker(key, kind, value) {
 
 pipelineView.addEventListener("click", (e) => {
   const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
+  if (d("cancel")) return renderVoc();
+  if (d("unreq")) return setVocMarker(d("unreq"), "requested", "");
+  if (d("ext")) return openUrl(d("ext")).catch((e) => alert(`Couldn't open the link:\n${e}`));
   if (d("run")) return launchClaudeCommand(d("run"));
   if (d("tab")) { plTab = d("tab"); return renderPipeline(); }
   if (d("vf")) { plVocFilter = d("vf"); return renderVoc(); }
@@ -2344,11 +2348,11 @@ pipelineView.addEventListener("click", (e) => {
     const r = row(d("req"));
     const gate = r.current_customer ? "This is a current customer: run the active-customer gate (churn/shared/active-customer-gate.md) first and stop if it blocks. " : "";
     if (plClaimName) invoke("set_voc_marker", { key: r.key, kind: "requested", value: plClaimName }).then(loadPipeline).catch(() => {});
-    return launchClaudeCommand(`/voc-skills:voc-recruit ${r.account} (closed ${r.date}, ${vocType(r)}, ${vocMoney(vocValue(r))}). ${gate}Sales rep: ${r.sales_rep || "unknown"}. CSM: ${r.csm || "unknown"}. Contact: ${r.contact?.name || "none on file"}.`);
+    return launchClaudeCommand(`/voc-skills:voc-recruit ${r.account} (closed ${r.date}, ${vocType(r)}, ${vocShown(r)}). ${gate}Sales rep: ${r.sales_rep || "unknown"}. CSM: ${r.csm || "unknown"}. Contact: ${r.contact?.name || "none on file"}.`);
   }
   if (d("dismiss")) {
     const cell = t.closest(".pl-vr").lastElementChild;
-    cell.innerHTML = `<select data-reason="${d("dismiss")}"><option value="">Why dismiss?</option>${VOC_REASONS.map((x) => `<option>${escapeHtml(x)}</option>`).join("")}</select>`;
+    cell.innerHTML = `<select data-reason="${d("dismiss")}"><option value="">Why dismiss?</option>${VOC_REASONS.map((x) => `<option>${escapeHtml(x)}</option>`).join("")}</select> <a data-cancel="1">Cancel</a>`;
   }
 });
 pipelineView.addEventListener("change", (e) => { const k = e.target.dataset?.reason; if (k && e.target.value) setVocMarker(k, "declined", e.target.value); });

@@ -2,6 +2,15 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.20.1
+- **VoC backlog feedback round 2.** Detail rows now have a "Open in Salesforce" link (sidecar `sfdc_url`; capability allows `https://*.salesforce.com/*` and `*.force.com`). The button reads just "Claim". Multi-line values (seller notes) sit in a label/value grid so wrapped lines align under the text, not under the label.
+- **Window is 90 days** (`VOC_MAX_AGE_DAYS` in `sfdc_sync.py` and `wishlist_sync.py`, `lib.js`, detail text).
+- **Auto-decline:** loss reasons "Prospect Went Dark" and "Timing" show as Declined with "Auto: <reason>" (derived in `pipeline.rs`, no marker file, no Undo).
+- **Unverified amounts:** when SFDC's Amount looks wrong (over $2M or $10K per location) and no subscription fee exists, the sync sets `acv` null and the Hub shows "value unverified" instead of a number; the raw figure appears in the detail panel. The "amount?" badge is gone.
+- **"current customer: gate first" badge removed from rows** (it sat on about 80% of rows). The detail panel says it, the header explains it, and Request VoC still starts with the gate. `current_customer` is no longer true for churned accounts.
+- **Dismiss:** the reason list is narrower with shorter options and has a Cancel link. **Claimed chip** lists claimed and requested rows (they used to sink below the 60 row cut); Release shows on every claimed row and requested rows get a Clear link.
+- Tier 3 wishlist rows with Gate = ACTIVE now read "Current customer, active-customer gate: ACTIVE" (ACTIVE = the account is still a customer, so the lost deal was an add-on).
+
 ## 0.20.0
 - **VoC backlog rebuilt from Zac's feedback on 0.19.0.** `pipeline.rs` now also reads `win-loss/voc-candidates.json` (written by the owner's SFDC sync) and merges it with the wishlist by key; sidecar rows win, wishlist-only rows (churn tier, hand-written) stay. New row fields: type, opportunity name, annual value and its source, amount flag, locations, reason code and seller notes, competitor, sales rep, CSM, contact (name, title, email), current-customer.
 - **Dollar amount:** the old Amount column showed one mis-keyed opportunity ($51.6M for a Walgreens pilot expansion). The sync now picks subscription fee x 12 when set, else Amount, and flags amounts over $2M or $10K per location; the Hub shows the source and an "amount?" badge.

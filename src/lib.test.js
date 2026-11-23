@@ -134,5 +134,10 @@ test("vocBuild hides completed VoCs and can sort by days left", () => {
   ];
   assert.deepEqual(vocBuild(rows, { today: T }).map((g) => g.best.key), ["a", "b"]);
   assert.deepEqual(vocBuild(rows, { today: T, sort: "days" }).map((g) => g.best.key), ["b", "a"]);
-  assert.equal(vocDaysLeft(rows[1], T), 7);
+  assert.equal(vocDaysLeft(rows[1], T), 5);
+});
+
+test("vocBuild claimed filter lists claimed and requested rows", () => {
+  const rows = [{ account: "A", kind: "loss", date: "2026-11-01", key: "a", claimed_by: "Zac" }, { account: "B", kind: "loss", date: "2026-11-01", key: "b" }];
+  assert.deepEqual(vocBuild(rows, { type: "claimed", today: Date.parse("2026-11-23") }).map((g) => g.best.key), ["a"]);
 });

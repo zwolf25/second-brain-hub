@@ -1,1 +1,1 @@
-The VoC backlog now ranks new-logo losses, churn and new-logo wins first, shows real deal values, and lets you search and open a row for the rep, CSM, contact and seller notes. Claim uses your own name.
+The VoC backlog now links to the Salesforce record, drops the 'amount?' and 'gate first' labels, auto-declines Prospect Went Dark and Timing losses, and uses a 90 day window.

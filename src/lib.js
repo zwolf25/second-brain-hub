@@ -123,14 +123,17 @@ export function vocType(r) {
 export function vocValue(r) {
   return typeof r.acv === "number" ? r.acv : vocPriority(r.amount).n;
 }
+export function vocShown(r) {
+  return r.amount_flag && typeof r.acv !== "number" ? "value unverified" : vocMoney(vocValue(r));
+}
 export function vocMoney(n) {
   if (!n) return "no amount";
   return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n)}`;
 }
-export function vocDaysLeft(r, today = Date.now(), windowDays = 92) {
+export function vocDaysLeft(r, today = Date.now(), windowDays = 90) {
   return Math.max(0, Math.round(windowDays - (today - Date.parse(r.date)) / 864e5));
 }
-export function vocScore(r, today = Date.now(), windowDays = 92) {
+export function vocScore(r, today = Date.now(), windowDays = 90) {
   const v = Math.min(Math.max(vocValue(r), 1000), 1e6);
   const value = ((Math.log10(v) - 3) / 3) * 30;
   const age = (today - Date.parse(r.date)) / 864e5;
@@ -140,7 +143,7 @@ export function vocScore(r, today = Date.now(), windowDays = 92) {
 }
 function vocHay(r) {
   const c = r.contact || {};
-  return [r.account, r.opp_name, VOC_TYPES[vocType(r)], r.why, r.reason_text, r.competitor, r.sales_rep, r.csm, c.name, c.title, c.email, r.date, r.amount, vocMoney(vocValue(r)), r.claimed_by, r.requested_by, r.status]
+  return [r.account, r.opp_name, VOC_TYPES[vocType(r)], r.why, r.reason_text, r.competitor, r.sales_rep, r.csm, c.name, c.title, c.email, r.date, r.amount, vocShown(r), r.claimed_by, r.requested_by, r.status]
     .filter(Boolean).join(" ").toLowerCase();
 }
 /** One entry per account: best candidate in `best`, the account's other deals in `others`. */
@@ -148,7 +151,7 @@ export function vocBuild(rows, { type = "all", query = "", services = false, sor
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const pool = rows.filter((r) => (type === "declined" ? r.declined : !r.declined && !/^(done|completed)/i.test(r.status || ""))
     && (services || type === "services" || vocType(r) !== "services")
-    && (type === "all" || type === "declined" || vocType(r) === type));
+    && (type === "all" || type === "declined" || (type === "claimed" ? r.claimed_by || r.requested_by : vocType(r) === type)));
   const byAcct = new Map();
   for (const r of pool) {
     const k = r.account.toLowerCase();

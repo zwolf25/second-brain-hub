@@ -1668,3 +1668,9 @@ label.transcripts-toggle {
 #voc-q { flex: 1; min-width: 14em; padding: 4px 8px; }
 .pl-next { background: #eef3ff; border-radius: 6px; padding: 0.5em 0.8em; margin: 0.5em 0; cursor: pointer; }
 #voc-sort { padding: 3px 6px; }
+.pl-detail { grid-template-columns: 8em 1fr; column-gap: 0.8em; }
+.pl-dv { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pl-detail a { color: #396cd8; cursor: pointer; text-decoration: underline; margin-left: 0.5em; }
+.pl-detail > div:not(.pl-dv) { grid-column: 1 / -1; }
+.pl-vr select { width: 11em; max-width: 11em; text-overflow: ellipsis; font-size: 0.85em; }
+.pl-vr > div:last-child { flex: 0 0 auto; max-width: 12em; }
