@@ -2096,7 +2096,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   const preloadPipeline = () => invoke("get_pipeline").then((d) => { plData = d; renderPipelineBadge(); }).catch(() => {});
   preloadPipeline();
   setInterval(preloadPipeline, 60 * 60 * 1000);
-  document.querySelector("#pipeline-refresh-btn").addEventListener("click", loadPipeline);
   onedrivePill.addEventListener("click", showOneDriveView);
   document.querySelector("#onedrive-banner-btn").addEventListener("click", showOneDriveView);
   document.querySelector("#onedrive-setting-btn").addEventListener("click", showOneDriveView);
@@ -2150,6 +2149,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     loadingOverlay.classList.remove("hidden");
     reindexBtn.disabled = true;
     invoke("reindex_now");
+    if (!pipelineView.classList.contains("hidden")) loadPipeline(); // header Refresh also reloads Market Intel
     invoke("refresh_plugin_drift").then(renderSkillsBadge);
     renderLinkHealth(); // reads the wikis folder directly, so it also updates the tab's count badge
   });

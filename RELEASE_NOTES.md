@@ -1,1 +1,1 @@
-Market Intel tabs now open reports, PMDs and competitor cards on double-click, with a Show folder button. PMDs can be searched by name, product manager or product marketing manager. The menu shows a waiting count, and the Hub notifies you when OneDrive stops syncing.
+Market Intel now refreshes from the header Refresh button. Its tabs open reports, PMDs and competitor cards on double-click, with a Show folder button, and PMDs can be searched by name, product manager or product marketing manager.

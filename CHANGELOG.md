@@ -2,6 +2,9 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.21.1
+- **Market Intel uses the header Refresh.** Removed the page's own Refresh button; the header button now also reloads Market Intel when it is the open page. Not verified by eye: please click header Refresh on Market Intel.
+
 ## 0.21.0
 - **Market Intel queues hide when empty.** The Queues fold shows only when a queue has items waiting, and lists only those queues. The three tabs always show (Zac: they must not hide, even with nothing to do).
 - **Open and search on the tabs.** Every output on the Win/Loss/Churn, PMDs and Competitive tabs is listed (stale first, no "Show all" fold). Double-click opens its markdown in the viewer (Back returns to Market Intel); "Show folder" reveals the containing folder (markdown, docx, PMD Notes). PMD tab: search box over name, PM, PMM, modules and the PMD module summary; each PMD shows its PM and PMM. Competitive tab: search box on name only. `pipeline.rs` returns `paths` (existing files only) and `assignments`, read from `pmds/_assignments.json` in the shared vault, which the owner builds from the Confluence "Product Area Assignments" page (the 11 ambiguous mappings were confirmed by Zac 2026-11-23, so none show "(to confirm)"). The Hub never calls Confluence.
