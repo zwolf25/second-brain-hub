@@ -15,6 +15,7 @@
       "allow": [{ "url": "claude://*" }, { "url": "ms-settings:*" }, { "url": "https://*.salesforce.com/*" }, { "url": "https://*.force.com/*" }]
     },
     "dialog:default",
+    "notification:default",
     "updater:default",
     "process:allow-restart"
   ]

@@ -1,1 +1,1 @@
-Dark mode is now readable on the Market Intel page and across the app: search highlights, the OneDrive page and warning banners.
+Market Intel tabs now open reports, PMDs and competitor cards on double-click, with a Show folder button. PMDs can be searched by name, product manager or product marketing manager. The menu shows a waiting count, and the Hub notifies you when OneDrive stops syncing.

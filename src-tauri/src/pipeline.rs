@@ -103,6 +103,39 @@ fn row_from(c: Cand) -> VocRow {
 pub struct PipelineData {
     pub status_json: Option<String>,
     pub voc: Vec<VocRow>,
+    /// Output name from the status JSON -> its main markdown file (only files that exist).
+    pub paths: std::collections::HashMap<String, String>,
+    /// PMD folder name -> PM / PMM, read from `pmds/_assignments.json` (owner-maintained from Confluence).
+    pub assignments: std::collections::HashMap<String, Assignment>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Assignment {
+    #[serde(default)]
+    pub pm: Vec<String>,
+    #[serde(default)]
+    pub pmm: Vec<String>,
+    #[serde(default)]
+    pub modules: Vec<String>,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub check: bool,
+}
+
+/// Where an output named in the status JSON lives in the shared vault.
+fn output_file(root: &Path, name: &str) -> Option<std::path::PathBuf> {
+    let rel = match name {
+        "Win/Loss/Churn report" => "win-loss/report/win-loss-report.md".to_string(),
+        "Landscape map" => "competitors/landscape-map/landscape-map.md".to_string(),
+        _ => match (name.strip_prefix("PMD: "), name.strip_prefix("Battlecard: ")) {
+            (Some(slug), _) => format!("pmds/{slug}/PMD.md"),
+            (_, Some(c)) => format!("competitors/{c}/battlecard.md"),
+            _ => return None,
+        },
+    };
+    let p = root.join(rel);
+    p.is_file().then_some(p)
 }
 
 fn kind_for(heading: &str) -> Option<&'static str> {
@@ -197,6 +230,20 @@ const AUTO_DECLINE: [&str; 2] = ["Prospect Went Dark", "Timing"];
 
 pub fn load(root: &Path) -> PipelineData {
     let status_json = std::fs::read_to_string(root.join("_status").join("intel-staleness.json")).ok();
+    let paths = status_json
+        .as_deref()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+        .and_then(|v| v["outputs"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|o| o["name"].as_str())
+        .filter_map(|n| output_file(root, n).map(|p| (n.to_string(), p.to_string_lossy().into_owned())))
+        .collect();
+    let assignments = std::fs::read_to_string(root.join("pmds").join("_assignments.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| serde_json::from_value(v["pmds"].clone()).ok())
+        .unwrap_or_default();
     let wishlist = std::fs::read_to_string(root.join("win-loss").join("interview-wishlist.md"))
         .map(|t| parse_wishlist(&t))
         .unwrap_or_default();
@@ -218,7 +265,7 @@ pub fn load(root: &Path) -> PipelineData {
             r.declined = format!("Auto: {}", r.why); // derived, no marker file; Hub hides Undo for these
         }
     }
-    PipelineData { status_json, voc }
+    PipelineData { status_json, voc, paths, assignments }
 }
 
 /// kind: "claim" | "requested" | "declined"; `value` empty removes the marker (Release / Undo).
@@ -248,6 +295,27 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = "## Tier 1: new-logo losses\n\n| Account | Closed | Amount | Segment | What the seller view says | Ask the buyer | Channel | Status |\n|---|---|---|---|---|---|---|---|\n| Urban Barn | 2026-09-22 | $40,000 | Retail | Lost after demo | Why? | Clozd | Open |\n\n## Tier 4: win-back\n| Account | Closed | Status |\n|---|---|---|\n| Skip Me | 2026-01-01 | Open |\n\n## Tier 5: churned\n\n| Account | Churned | ARR | CSM reason | Competitor named | Ask | Status |\n|---|---|---|---|---|---|---|\n| Acme Co. | 2026-08-01 | $75,000 | pricing | | q | Open |\n";
+
+    #[test]
+    fn output_paths_and_assignments_load_only_what_exists() {
+        let d = tempfile::tempdir().unwrap();
+        let w = |rel: &str, body: &str| {
+            let p = d.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        w("_status/intel-staleness.json", r#"{"outputs":[{"name":"PMD: easypay"},{"name":"PMD: ghost"},{"name":"Battlecard: Corrigo"},{"name":"Win/Loss/Churn report"},{"name":"Landscape map"}]}"#);
+        w("pmds/easypay/PMD.md", "x");
+        w("competitors/Corrigo/battlecard.md", "x");
+        w("win-loss/report/win-loss-report.md", "x");
+        w("pmds/_assignments.json", r#"{"pmds":{"easypay":{"pm":["Lisa Pei"],"pmm":["Kaycie Kaeding"],"check":true}}}"#);
+        let p = load(d.path());
+        let mut names: Vec<_> = p.paths.keys().cloned().collect();
+        names.sort();
+        assert_eq!(names, ["Battlecard: Corrigo", "PMD: easypay", "Win/Loss/Churn report"]);
+        assert_eq!(p.assignments["easypay"].pm, ["Lisa Pei"]);
+        assert!(p.assignments["easypay"].check);
+    }
 
     #[test]
     fn parses_tiers_and_skips_win_back() {

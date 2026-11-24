@@ -808,7 +808,20 @@ fn onedrive_check(app: &AppHandle) -> onedrive::Status {
         let _ = t.set_tooltip(Some(tip));
     }
     let _ = app.emit("onedrive-status", &status);
+    if red_episode_starts(&OD_WAS_RED, status.worst) {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app.notification().builder().title("OneDrive needs attention").body("Open the Second Brain Hub for the fix steps.").show();
+    }
     status
+}
+
+static OD_WAS_RED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True once per red episode: the check that turns red notifies, later red checks stay quiet until it recovers.
+fn red_episode_starts(was_red: &std::sync::atomic::AtomicBool, worst: &str) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let red = worst == "red";
+    was_red.swap(red, SeqCst) != red && red
 }
 
 #[tauri::command]
@@ -1015,6 +1028,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|w, e| {
@@ -1235,5 +1249,18 @@ mod lock_tests {
         .join();
         assert!(m.lock().is_err(), "mutex should be poisoned");
         assert_eq!(*m.lock_recover(), 1);
+    }
+}
+
+#[cfg(test)]
+mod od_notify_tests {
+    use super::red_episode_starts;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn notifies_once_per_red_episode() {
+        let f = AtomicBool::new(false);
+        let seq: Vec<bool> = ["ok", "red", "red", "yellow", "red"].iter().map(|w| red_episode_starts(&f, w)).collect();
+        assert_eq!(seq, [false, true, false, false, true]);
     }
 }

@@ -178,3 +178,12 @@ export function updateErrorText(e) {
   if (/signature/i.test(m)) return "The update didn't pass its security check, so it wasn't installed. Tell the owner.";
   return `Something went wrong while checking. Try again in a few minutes; if it keeps happening, tell the owner.\n(${m.slice(0, 160)})`;
 }
+
+// ⌘/Ctrl + key -> page. The `<kbd>` hints in index.html must list exactly these keys (lib.test.js checks it).
+export const NAV_KEYS = { 1: "search", 2: "transcripts", 3: "skills", 4: "map", 5: "onedrive", 6: "pipeline", ",": "settings" };
+
+// Number on the Market Intel menu row: items waiting in queues plus stale outputs.
+export function pipelineBadgeCount(status) {
+  if (!status) return 0;
+  return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length;
+}

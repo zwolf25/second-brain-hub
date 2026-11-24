@@ -2,6 +2,15 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.21.0
+- **Market Intel queues hide when empty.** The Queues fold shows only when a queue has items waiting, and lists only those queues. The three tabs always show (Zac: they must not hide, even with nothing to do).
+- **Open and search on the tabs.** Every output on the Win/Loss/Churn, PMDs and Competitive tabs is listed (stale first, no "Show all" fold). Double-click opens its markdown in the viewer (Back returns to Market Intel); "Show folder" reveals the containing folder (markdown, docx, PMD Notes). PMD tab: search box over name, PM, PMM, modules and the PMD module summary; each PMD shows its PM and PMM. Competitive tab: search box on name only. `pipeline.rs` returns `paths` (existing files only) and `assignments`, read from `pmds/_assignments.json` in the shared vault, which the owner builds from the Confluence "Product Area Assignments" page (the 11 ambiguous mappings were confirmed by Zac 2026-11-23, so none show "(to confirm)"). The Hub never calls Confluence.
+- **VoC backlog layout.** Heading stays on one line; the type tag has a fixed width so account names line up in one column whatever the label.
+- **Count on the Market Intel menu row** (queued items plus stale outputs), loaded at launch and hourly, so work waiting is visible without opening the page. `pipelineBadgeCount` in `lib.js`, tested.
+- **OS notification when OneDrive goes red**, once per red episode (F-18). `tauri-plugin-notification` added; `lib.rs::onedrive_check` calls `red_episode_starts` (tested) after each probe. New dependency, `notification:default` capability.
+- **Shortcut map moved to `lib.js` (`NAV_KEYS`)** and tested against the `<kbd>` hints in `index.html` (TD-15).
+- Not verified by eye or on Windows (Claude cannot click the app): the macOS notification permission prompt and wording, the menu count, and an empty Market Intel page. Please tick SMOKE items 29 and 31, and try double-click, Show folder and PMD search.
+
 ## 0.20.3
 - **Dark mode fixes.** The Market Intel page had no dark styles, so the VoC detail panel, "Next up" banner, tags, tabs and borders were light-on-light and unreadable. Added a dark block for every `.pl-*` rule. Audit of the whole stylesheet found 15 more rules with light-only colours and no dark override (`.result-snippet b` highlight with inherited light text, `.od-card`, `.od-checks`, `.od-pill-*`, `.update-banner-red`, `.show-all-btn`, `.health-ro`, `.error`, `.t-expand:hover`); all now have dark values. Hex colours only were audited; the Neural Map canvas already follows the OS theme in JS.
 - Not verified by eye (Claude cannot click the app): please check Market Intel, Search highlights, the OneDrive page and a red update banner in dark mode.

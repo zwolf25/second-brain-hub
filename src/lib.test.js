@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft, updateErrorText } from "./lib.js";
+import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft, updateErrorText, NAV_KEYS, pipelineBadgeCount } from "./lib.js";
 
 test("fuzzyScore: subsequence match, tighter span scores lower, miss is null", () => {
   assert.equal(fuzzyScore("wo", "Work Orders"), 1);
@@ -158,4 +158,17 @@ test("vocBuild mine keeps only rows claimed or requested by that person", () => 
   const T = Date.parse("2026-11-23");
   assert.deepEqual(vocBuild(rows, { today: T, mine: "Zac Wolf" }).map((g) => g.best.key).sort(), ["a", "b"]);
   assert.equal(vocBuild(rows, { today: T }).length, 4);
+});
+
+test("NAV_KEYS matches the <kbd> hints in index.html", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const hints = [...html.matchAll(/<kbd>⌘(.)<\/kbd>/g)].map((m) => m[1]).sort();
+  assert.deepEqual(hints, Object.keys(NAV_KEYS).sort());
+});
+
+test("pipelineBadgeCount adds queued items and stale outputs", () => {
+  assert.equal(pipelineBadgeCount(null), 0);
+  assert.equal(pipelineBadgeCount({ queues: [{ pending: 3 }, { pending: 0 }], outputs: [{ stale: true }, { stale: false }, { stale: true }] }), 5);
+  assert.equal(pipelineBadgeCount({ queues: [], outputs: [] }), 0);
 });

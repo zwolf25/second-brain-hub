@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -1887,7 +1887,8 @@ document.querySelector("#search-btn").addEventListener("click", showSearchView);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleMenu(false);
   if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !hasVault) return;
-  const go = { 1: showSearchView, 2: showTranscriptsView, 3: showSkillsView, 4: showMapView, 5: showOneDriveView, 6: showPipelineView, ",": showSettingsView }[e.key];
+  const views = { search: showSearchView, transcripts: showTranscriptsView, skills: showSkillsView, map: showMapView, onedrive: showOneDriveView, pipeline: showPipelineView, settings: showSettingsView };
+  const go = views[NAV_KEYS[e.key]];
   if (!go || (go === showTranscriptsView && document.querySelector("#transcripts-btn").classList.contains("hidden"))) return;
   e.preventDefault();
   go();
@@ -2092,6 +2093,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   invoke("refresh_onedrive_status").then(renderOneDrive).catch(() => {});
   document.querySelector("#onedrive-badge").addEventListener("click", showOneDriveView);
   document.querySelector("#pipeline-badge").addEventListener("click", showPipelineView);
+  const preloadPipeline = () => invoke("get_pipeline").then((d) => { plData = d; renderPipelineBadge(); }).catch(() => {});
+  preloadPipeline();
+  setInterval(preloadPipeline, 60 * 60 * 1000);
   document.querySelector("#pipeline-refresh-btn").addEventListener("click", loadPipeline);
   onedrivePill.addEventListener("click", showOneDriveView);
   document.querySelector("#onedrive-banner-btn").addEventListener("click", showOneDriveView);
@@ -2214,7 +2218,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!(await confirmLeaveEdit())) return;
     exitEdit();
     if (viewerHistory.length) return openInViewer(viewerHistory.pop(), viewerReturnTo, { keepHistory: true });
-    if (viewerReturnTo === "map") showMapView();
+    if (viewerReturnTo === "pipeline") showPipelineView();
+    else if (viewerReturnTo === "map") showMapView();
     else if (viewerReturnTo === "transcripts") {
       // List DOM is untouched while the viewer is up, so selection/filters survive; only scroll resets.
       showView("transcripts");
@@ -2233,12 +2238,20 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 
 // ---- Pipeline page (reads _status/intel-staleness.json and win-loss/interview-wishlist.md; Run opens Claude) ----
-let plData = null, plTab = "wl", plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plVocMine = false, plClaimName = null, plOpen = new Set();
+let plData = null, plTab = "wl", plQuery = { pmd: "", comp: "" }, plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plVocMine = false, plClaimName = null, plOpen = new Set();
 
 async function showPipelineView() {
   showView("pipeline");
   toggleMenu(false);
   await loadPipeline();
+}
+
+function renderPipelineBadge() {
+  const n = pipelineBadgeCount(plData?.status_json ? JSON.parse(plData.status_json) : null);
+  const tag = document.querySelector("#pipeline-badge .nav-tag");
+  tag.textContent = n;
+  tag.classList.toggle("hidden", !n);
+  document.querySelector("#pipeline-badge kbd").classList.toggle("hidden", !!n);
 }
 
 async function loadPipeline() {
@@ -2259,19 +2272,26 @@ function renderPipeline() {
   document.querySelector("#pipeline-generated").textContent = `Updated ${status.generated.slice(0, 16).replace("T", " ")} UTC${ageH > 48 ? " (older than 48 hours, owner may need to check)" : ""}`;
   const tabs = pipelineTabs(status.outputs);
   const stale = (k) => tabs[k].filter((o) => o.stale).length;
+  renderPipelineBadge();
   const first = stale("wl") ? "Start with the Win/Loss/Churn report" : stale("pmd") ? "Refresh the stale PMDs" : stale("comp") ? "Refresh the stale competitive cards" : "Everything is current";
   sum.innerHTML = `<div class="pl-title">${escapeHtml(first)}</div><div class="muted">Then PMDs, then Competitive, in that order.</div>`;
-  const waiting = status.queues.reduce((n, q) => n + (q.pending || 0), 0);
+  const active = status.queues.filter((q) => q.pending > 0), waiting = active.reduce((n, q) => n + q.pending, 0);
   const qd = document.querySelector("#pipeline-feeds");
-  qd.querySelector("summary").innerHTML = waiting ? `Queues <span class="pl-warn">${waiting} waiting</span>` : "Queues";
-  if (waiting && !qd.dataset.seen) { qd.open = true; qd.dataset.seen = "1"; }
-  document.querySelector("#pipeline-queues").innerHTML = status.queues.map((q) => `<div class="pl-q"><span>${escapeHtml(q.name)}${q.pending ? "" : " · empty"}</span><span class="muted">${q.pending ? `${q.pending} waiting` : ""}</span>${q.pending ? `<button class="topbar-btn" data-run="/${escapeHtml(q.skill)}">Process</button>` : ""}</div>`).join("") + (status.queues_skipped ? `<div class="muted">Some queues are owner machine only.</div>` : "");
+  qd.classList.toggle("hidden", !active.length);
+  qd.querySelector("summary").innerHTML = `Queues <span class="pl-warn">${waiting} waiting</span>`;
+  if (active.length && !qd.dataset.seen) { qd.open = true; qd.dataset.seen = "1"; }
+  document.querySelector("#pipeline-queues").innerHTML = active.map((q) => `<div class="pl-q"><span>${escapeHtml(q.name)}</span><span class="muted">${q.pending} waiting</span><button class="topbar-btn" data-run="/${escapeHtml(q.skill)}">Process</button></div>`).join("") + (status.queues_skipped ? `<div class="muted">Some queues are owner machine only.</div>` : "");
   const labels = { wl: "1 · Win/Loss/Churn", pmd: "2 · PMDs", comp: "3 · Competitive" };
   document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${stale(k)}</i></button>`).join("");
   const list = tabs[plTab], need = list.filter((o) => o.stale);
   const newWhat = { wl: "new win/loss/churn records", pmd: "new stories, NPS responses and win/loss records", comp: "new records about this competitor" }[plTab];
-  const row = (o) => `<div class="pl-row"><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span><div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div>${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div>`;
-  rows.innerHTML = need.map(row).join("") + (list.length > need.length ? `<details class="pl-all"><summary>Show all ${list.length}</summary>${list.filter((o) => !o.stale).map(row).join("")}</details>` : "") || `<div class="muted">Nothing here.</div>`;
+  const asg = (o) => (plTab === "pmd" ? plData.assignments?.[o.name.replace(/^PMD:\s*/, "")] : null);
+  const people = (a) => (a ? `<div class="muted pl-pm">PM: ${escapeHtml(a.pm?.join(", ") || "none listed")} · PMM: ${escapeHtml(a.pmm?.join(", ") || "none listed")}${a.check ? " (to confirm)" : ""}</div>` : "");
+  const row = (o) => { const p = plData.paths?.[o.name]; return `<div class="pl-row" ${p ? `data-doc="${escapeHtml(p)}" title="Double-click to open"` : ""}><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${people(asg(o))}<div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div><div class="pl-acts">${p ? `<button class="topbar-btn" data-folder="${escapeHtml(p)}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : ""}${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div></div>`; };
+  const q = (plQuery[plTab] ?? "").trim().toLowerCase();
+  const hay = (o) => { if (plTab === "comp") return o.name.toLowerCase(); const a = asg(o); return [o.name, a?.pm, a?.pmm, a?.modules, a?.summary].flat().filter(Boolean).join(" ").toLowerCase(); };
+  const shown = q ? list.filter((o) => q.split(/\s+/).every((w) => hay(o).includes(w))) : [...need, ...list.filter((o) => !o.stale)];
+  rows.innerHTML = (plTab in plQuery ? `<input id="pl-pmd-q" type="search" placeholder="${plTab === "pmd" ? "Search by keyword, PMD name, product manager or product marketing manager..." : "Search by name..."}" value="${escapeHtml(plQuery[plTab])}">` : "") + (shown.map(row).join("") || `<div class="muted">Nothing here.</div>`);
   renderVoc();
 }
 
@@ -2390,6 +2410,7 @@ async function setVocMarker(key, kind, value) {
 
 pipelineView.addEventListener("click", (e) => {
   const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
+  if (d("folder")) return revealItemInDir(d("folder")).catch((e) => alert(`Couldn't show the folder:\n${e}`));
   if (d("cancel")) return renderVoc();
   if (d("unreq")) return setVocMarker(d("unreq"), "requested", "");
   if (d("ext")) return openUrl(d("ext")).catch((e) => alert(`Couldn't open the link:\n${e}`));
@@ -2416,4 +2437,12 @@ pipelineView.addEventListener("click", (e) => {
 pipelineView.addEventListener("change", (e) => { const k = e.target.dataset?.reason; if (k && e.target.value) setVocMarker(k, "declined", e.target.value); });
 pipelineView.addEventListener("input", (e) => {
   if (e.target.id === "voc-q") { plVocQuery = e.target.value; renderVoc(); }
+  if (e.target.id === "pl-pmd-q") {
+    plQuery[plTab] = e.target.value; renderPipeline();
+    const el = document.querySelector("#pl-pmd-q"); el.focus(); el.setSelectionRange(el.value.length, el.value.length);
+  }
+});
+pipelineView.addEventListener("dblclick", (e) => {
+  const p = e.target.closest("[data-doc]")?.dataset.doc;
+  if (p && !e.target.closest("button")) openInViewer(p, "pipeline");
 });

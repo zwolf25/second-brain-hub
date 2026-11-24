@@ -1711,3 +1711,10 @@ label.transcripts-toggle {
   .od-pill-yellow { background: #4a3a14; color: #ffd98a; }
   .od-pill-blue { background: #26324d; color: #a9c1ff; }
 }
+
+.pl-vh b { white-space: nowrap; flex: none; }
+.pl-vr > .pl-tag { flex: 0 0 9em; box-sizing: border-box; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-row .pl-acts { display: flex; gap: 0.5em; align-items: center; flex: none; }
+.pl-row[data-doc] { cursor: pointer; }
+.pl-pm { font-size: 0.85em; }
+#pl-pmd-q { width: 100%; margin: 0.4em 0; }
