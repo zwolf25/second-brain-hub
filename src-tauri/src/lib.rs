@@ -289,7 +289,7 @@ fn sync_usage(app: &AppHandle) {
 /// Frontend usage counter. Counts only; the field is whitelisted so the UI cannot write arbitrary keys.
 #[tauri::command]
 fn audit_count(app: AppHandle, field: String) {
-    if matches!(field.as_str(), "hub_searches" | "hub_wikis_opened") {
+    if matches!(field.as_str(), "hub_searches" | "hub_wikis_opened" | "hub_intel_opened") {
         audit::bump(&app.state::<Arc<AppState>>().transcripts_dir, &field, 1);
     }
 }

@@ -1,1 +1,1 @@
-Market Intel now refreshes from the header Refresh button. Its tabs open reports, PMDs and competitor cards on double-click, with a Show folder button, and PMDs can be searched by name, product manager or product marketing manager.
+Opening a report, PMD or battlecard from Market Intel now counts toward the Time Savings dashboard. Market Intel also refreshes from the header button, and has an Open button on each row.

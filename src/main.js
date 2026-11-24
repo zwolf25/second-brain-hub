@@ -2407,9 +2407,14 @@ async function setVocMarker(key, kind, value) {
   await loadPipeline();
 }
 
+// Opening a report, PMD or battlecard from Market Intel counts for the time-savings dashboard (weekly total only, no names).
+function openIntel(path) {
+  invoke("audit_count", { field: "hub_intel_opened" }).catch(() => {});
+  return openInViewer(path, "pipeline");
+}
 pipelineView.addEventListener("click", (e) => {
   const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
-  if (d("openbtn")) return openInViewer(d("openbtn"), "pipeline");
+  if (d("openbtn")) return openIntel(d("openbtn"));
   if (d("folder")) return revealItemInDir(d("folder")).catch((e) => alert(`Couldn't show the folder:\n${e}`));
   if (d("cancel")) return renderVoc();
   if (d("unreq")) return setVocMarker(d("unreq"), "requested", "");
@@ -2444,5 +2449,5 @@ pipelineView.addEventListener("input", (e) => {
 });
 pipelineView.addEventListener("dblclick", (e) => {
   const p = e.target.closest("[data-doc]")?.dataset.doc;
-  if (p && !e.target.closest("button")) openInViewer(p, "pipeline");
+  if (p && !e.target.closest("button")) openIntel(p);
 });
