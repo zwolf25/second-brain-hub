@@ -3,7 +3,7 @@
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
 ## 0.21.1
-- **Market Intel uses the header Refresh.** Removed the page's own Refresh button; the header button now also reloads Market Intel when it is the open page. Not verified by eye: please click header Refresh on Market Intel.
+- **Market Intel uses the header Refresh.** Removed the page's own Refresh button; the header button now also reloads Market Intel when it is the open page. Also: visible Open button per row; tab search matching moved to `lib.js` (`planSearch`, tested); `output_file` rejects `..` and slashes in output names (tested); PMD tab shows the date of the Confluence page the PM/PMM data came from (`assignments_as_of`). Not verified by eye: please click header Refresh, Open and the PMD search on Market Intel.
 
 ## 0.21.0
 - **Market Intel queues hide when empty.** The Queues fold shows only when a queue has items waiting, and lists only those queues. The three tabs always show (Zac: they must not hide, even with nothing to do).

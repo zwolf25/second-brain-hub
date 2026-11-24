@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount, planSearch } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -2287,11 +2287,10 @@ function renderPipeline() {
   const newWhat = { wl: "new win/loss/churn records", pmd: "new stories, NPS responses and win/loss records", comp: "new records about this competitor" }[plTab];
   const asg = (o) => (plTab === "pmd" ? plData.assignments?.[o.name.replace(/^PMD:\s*/, "")] : null);
   const people = (a) => (a ? `<div class="muted pl-pm">PM: ${escapeHtml(a.pm?.join(", ") || "none listed")} · PMM: ${escapeHtml(a.pmm?.join(", ") || "none listed")}${a.check ? " (to confirm)" : ""}</div>` : "");
-  const row = (o) => { const p = plData.paths?.[o.name]; return `<div class="pl-row" ${p ? `data-doc="${escapeHtml(p)}" title="Double-click to open"` : ""}><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${people(asg(o))}<div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div><div class="pl-acts">${p ? `<button class="topbar-btn" data-folder="${escapeHtml(p)}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : ""}${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div></div>`; };
-  const q = (plQuery[plTab] ?? "").trim().toLowerCase();
-  const hay = (o) => { if (plTab === "comp") return o.name.toLowerCase(); const a = asg(o); return [o.name, a?.pm, a?.pmm, a?.modules, a?.summary].flat().filter(Boolean).join(" ").toLowerCase(); };
-  const shown = q ? list.filter((o) => q.split(/\s+/).every((w) => hay(o).includes(w))) : [...need, ...list.filter((o) => !o.stale)];
-  rows.innerHTML = (plTab in plQuery ? `<input id="pl-pmd-q" type="search" placeholder="${plTab === "pmd" ? "Search by keyword, PMD name, product manager or product marketing manager..." : "Search by name..."}" value="${escapeHtml(plQuery[plTab])}">` : "") + (shown.map(row).join("") || `<div class="muted">Nothing here.</div>`);
+  const row = (o) => { const p = plData.paths?.[o.name]; return `<div class="pl-row" ${p ? `data-doc="${escapeHtml(p)}" title="Double-click to open"` : ""}><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${people(asg(o))}<div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div><div class="pl-acts">${p ? `<button class="topbar-btn" data-openbtn="${escapeHtml(p)}" title="Open the markdown">Open</button><button class="topbar-btn" data-folder="${escapeHtml(p)}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : ""}${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div></div>`; };
+  const ordered = [...need, ...list.filter((o) => !o.stale)];
+  const shown = planSearch(ordered, plQuery[plTab], plTab, plData.assignments);
+  rows.innerHTML = (plTab === "pmd" && plData.assignments_as_of ? `<div class="muted pl-pm">PM and PMM as of the Confluence Product Area Assignments page, ${escapeHtml(plData.assignments_as_of)}.</div>` : "") + (plTab in plQuery ? `<input id="pl-pmd-q" type="search" placeholder="${plTab === "pmd" ? "Search by keyword, PMD name, product manager or product marketing manager..." : "Search by name..."}" value="${escapeHtml(plQuery[plTab])}">` : "") + (shown.map(row).join("") || `<div class="muted">Nothing here.</div>`);
   renderVoc();
 }
 
@@ -2410,6 +2409,7 @@ async function setVocMarker(key, kind, value) {
 
 pipelineView.addEventListener("click", (e) => {
   const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
+  if (d("openbtn")) return openInViewer(d("openbtn"), "pipeline");
   if (d("folder")) return revealItemInDir(d("folder")).catch((e) => alert(`Couldn't show the folder:\n${e}`));
   if (d("cancel")) return renderVoc();
   if (d("unreq")) return setVocMarker(d("unreq"), "requested", "");

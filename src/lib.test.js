@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft, updateErrorText, NAV_KEYS, pipelineBadgeCount } from "./lib.js";
+import { fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible, vocType, vocScore, vocBuild, vocMoney, vocDaysLeft, updateErrorText, NAV_KEYS, pipelineBadgeCount, planSearch } from "./lib.js";
 
 test("fuzzyScore: subsequence match, tighter span scores lower, miss is null", () => {
   assert.equal(fuzzyScore("wo", "Work Orders"), 1);
@@ -171,4 +171,13 @@ test("pipelineBadgeCount adds queued items and stale outputs", () => {
   assert.equal(pipelineBadgeCount(null), 0);
   assert.equal(pipelineBadgeCount({ queues: [{ pending: 3 }, { pending: 0 }], outputs: [{ stale: true }, { stale: false }, { stale: true }] }), 5);
   assert.equal(pipelineBadgeCount({ queues: [], outputs: [] }), 0);
+});
+
+test("planSearch: PMD search hits PM, PMM and summary; Competitive is name only", () => {
+  const outs = [{ name: "PMD: easypay" }, { name: "PMD: other" }];
+  const asg = { easypay: { pm: ["Lisa Pei"], pmm: ["Kaycie Kaeding"], modules: ["Payments"], summary: "Pay invoices" }, other: { pm: ["Casey Swan"], pmm: [] } };
+  assert.deepEqual(planSearch(outs, "lisa", "pmd", asg).map((o) => o.name), ["PMD: easypay"]);
+  assert.deepEqual(planSearch(outs, "kaycie pay", "pmd", asg).length, 1);
+  assert.equal(planSearch(outs, "casey", "comp", asg).length, 0);
+  assert.equal(planSearch(outs, "  ", "pmd", asg).length, 2);
 });

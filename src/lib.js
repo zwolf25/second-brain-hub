@@ -187,3 +187,15 @@ export function pipelineBadgeCount(status) {
   if (!status) return 0;
   return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length;
 }
+
+// Market Intel tab search: every word must match. Competitive matches the name only; PMDs also match PM, PMM, modules and summary.
+export function planSearch(outputs, query, tab, assignments = {}) {
+  const words = (query ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return outputs;
+  const hay = (o) => {
+    if (tab !== "pmd") return o.name.toLowerCase();
+    const a = assignments[o.name.replace(/^PMD:\s*/, "")];
+    return [o.name, a?.pm, a?.pmm, a?.modules, a?.summary].flat().filter(Boolean).join(" ").toLowerCase();
+  };
+  return outputs.filter((o) => words.every((w) => hay(o).includes(w)));
+}

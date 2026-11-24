@@ -107,6 +107,8 @@ pub struct PipelineData {
     pub paths: std::collections::HashMap<String, String>,
     /// PMD folder name -> PM / PMM, read from `pmds/_assignments.json` (owner-maintained from Confluence).
     pub assignments: std::collections::HashMap<String, Assignment>,
+    /// Confluence page's modified date when `_assignments.json` was built.
+    pub assignments_as_of: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -125,12 +127,15 @@ pub struct Assignment {
 
 /// Where an output named in the status JSON lives in the shared vault.
 fn output_file(root: &Path, name: &str) -> Option<std::path::PathBuf> {
+    if name.contains("..") || name.contains('\\') {
+        return None; // names come from a shared file; never let one climb out of the vault
+    }
     let rel = match name {
         "Win/Loss/Churn report" => "win-loss/report/win-loss-report.md".to_string(),
         "Landscape map" => "competitors/landscape-map/landscape-map.md".to_string(),
         _ => match (name.strip_prefix("PMD: "), name.strip_prefix("Battlecard: ")) {
-            (Some(slug), _) => format!("pmds/{slug}/PMD.md"),
-            (_, Some(c)) => format!("competitors/{c}/battlecard.md"),
+            (Some(slug), _) if !slug.contains('/') => format!("pmds/{slug}/PMD.md"),
+            (_, Some(c)) if !c.contains('/') => format!("competitors/{c}/battlecard.md"),
             _ => return None,
         },
     };
@@ -239,11 +244,18 @@ pub fn load(root: &Path) -> PipelineData {
         .filter_map(|o| o["name"].as_str())
         .filter_map(|n| output_file(root, n).map(|p| (n.to_string(), p.to_string_lossy().into_owned())))
         .collect();
-    let assignments = std::fs::read_to_string(root.join("pmds").join("_assignments.json"))
+    let asg_json = std::fs::read_to_string(root.join("pmds").join("_assignments.json"))
         .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let assignments = asg_json
+        .as_ref()
         .and_then(|v| serde_json::from_value(v["pmds"].clone()).ok())
         .unwrap_or_default();
+    let assignments_as_of = asg_json
+        .as_ref()
+        .and_then(|v| v["source_modified"].as_str())
+        .unwrap_or_default()
+        .to_string();
     let wishlist = std::fs::read_to_string(root.join("win-loss").join("interview-wishlist.md"))
         .map(|t| parse_wishlist(&t))
         .unwrap_or_default();
@@ -265,7 +277,7 @@ pub fn load(root: &Path) -> PipelineData {
             r.declined = format!("Auto: {}", r.why); // derived, no marker file; Hub hides Undo for these
         }
     }
-    PipelineData { status_json, voc, paths, assignments }
+    PipelineData { status_json, voc, paths, assignments, assignments_as_of }
 }
 
 /// kind: "claim" | "requested" | "declined"; `value` empty removes the marker (Release / Undo).
@@ -308,13 +320,17 @@ mod tests {
         w("pmds/easypay/PMD.md", "x");
         w("competitors/Corrigo/battlecard.md", "x");
         w("win-loss/report/win-loss-report.md", "x");
-        w("pmds/_assignments.json", r#"{"pmds":{"easypay":{"pm":["Lisa Pei"],"pmm":["Kaycie Kaeding"],"check":true}}}"#);
+        w("pmds/_assignments.json", r#"{"source_modified":"2026-11-20","pmds":{"easypay":{"pm":["Lisa Pei"],"pmm":["Kaycie Kaeding"],"check":true}}}"#);
         let p = load(d.path());
         let mut names: Vec<_> = p.paths.keys().cloned().collect();
         names.sort();
         assert_eq!(names, ["Battlecard: Corrigo", "PMD: easypay", "Win/Loss/Churn report"]);
         assert_eq!(p.assignments["easypay"].pm, ["Lisa Pei"]);
         assert!(p.assignments["easypay"].check);
+        assert_eq!(p.assignments_as_of, "2026-11-20");
+        assert!(output_file(d.path(), "PMD: ../../etc").is_none());
+        w("competitors/a/b/battlecard.md", "x");
+        assert!(output_file(d.path(), "Battlecard: a/b").is_none());
     }
 
     #[test]
