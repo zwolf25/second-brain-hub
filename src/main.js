@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount, planSearch } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount, planSearch, compSections, compTabCount, compName, competitorLine, watchReady } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -222,7 +222,7 @@ openOsDefaultSettingsBtn.addEventListener("click", () => {
 // Every top-level section toggles through this one helper instead of each
 // show*View() hand-repeating a `classList` line per sibling section.
 const VIEWS = { onboarding, search: searchView, viewer: viewerView, map: mapView, skills: skillsView, transcripts: transcriptsView, onedrive: onedriveView, pipeline: pipelineView };
-const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Neural Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive", pipeline: "Market Intelligence Pipeline" };
+const VIEW_TITLES = { onboarding: "Settings", search: "Search", map: "Neural Map", skills: "Skills", transcripts: "Transcripts", onedrive: "OneDrive Heartbeat", pipeline: "Market Intelligence Pipeline" };
 let currentView = "search";
 let hasVault = false;
 function showView(name) {
@@ -1053,16 +1053,16 @@ const mapTooltip = document.querySelector("#map-tooltip");
 const mapStatsEl = document.querySelector("#map-stats");
 
 const MAP_ACCENT = "#396cd8";
-const MAP_REPULSION_K = 12000,
+const MAP_REPULSION_K = 26000,
   MAP_SPRING_K = 0.015,
-  MAP_REST_LENGTH = 210,
-  MAP_CHILD_REST_LENGTH = 130, // hub-child pairs sit closer so each wiki family clusters
+  MAP_REST_LENGTH = 320,
+  MAP_CHILD_REST_LENGTH = 190, // hub-child pairs sit closer so each wiki family clusters
   MAP_CENTER_K = 0.004,
   MAP_VELOCITY_DECAY = 0.6,
   MAP_ALPHA_DECAY = 0.0175,
   MAP_ALPHA_MIN = 0.001,
   MAP_MAX_SPEED = 40,
-  MAP_COLLIDE_PAD = 20,
+  MAP_COLLIDE_PAD = 34,
   MAP_COLLIDE_K = 0.9,
   MAP_RMIN = 4,
   MAP_RMAX = 18;
@@ -1079,6 +1079,7 @@ const mapState = {
   viewStart: null,
   hovered: null,
   selected: null,
+  match: null, // Set of node ids matching the map search, or null when no search is active
   dpr: 1,
   running: false,
 };
@@ -1211,12 +1212,15 @@ function mapDraw() {
     hovered = mapState.hovered;
   const dimming = !!selected;
   const activeSet = selected ? mapState.adjacency.get(selected.id) : null;
+  const match = mapState.match,
+    matching = !!match;
 
   for (const e of mapState.edges) {
     const involved = selected && (e.s === selected || e.t === selected);
     mapCtx.lineWidth = (e.child ? 2.4 : 1) / v.k;
     mapCtx.strokeStyle = dimming ? (involved ? MAP_ACCENT : border) : e.child ? MAP_ACCENT : border;
-    mapCtx.globalAlpha = dimming && !involved ? 0.15 : involved ? 0.65 : e.child ? 0.55 : 1;
+    const edgeOut = matching && !(match.has(e.s.id) && match.has(e.t.id));
+    mapCtx.globalAlpha = edgeOut ? 0.06 : dimming && !involved ? 0.1 : involved ? 0.65 : e.child ? 0.3 : 0.45;
     mapCtx.beginPath();
     mapCtx.moveTo(e.s.x, e.s.y);
     mapCtx.lineTo(e.t.x, e.t.y);
@@ -1226,15 +1230,16 @@ function mapDraw() {
 
   for (const n of mapState.nodes) {
     const dim = dimming && n !== selected && !(activeSet && activeSet.has(n.id));
-    mapCtx.globalAlpha = dim ? 0.3 : 1;
+    const grey = matching && !match.has(n.id);
+    mapCtx.globalAlpha = grey ? 0.35 : dim ? 0.3 : 1;
     mapCtx.beginPath();
     mapCtx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-    mapCtx.fillStyle = MAP_ACCENT;
+    mapCtx.fillStyle = grey ? (isDark ? "#666" : "#bbb") : MAP_ACCENT;
     mapCtx.fill();
     if (n.hub) {
       // Ring marks a hub wiki (lists children under "## Child wikis").
       mapCtx.lineWidth = 1.5 / v.k;
-      mapCtx.strokeStyle = MAP_ACCENT;
+      mapCtx.strokeStyle = grey ? (isDark ? "#666" : "#bbb") : MAP_ACCENT;
       mapCtx.beginPath();
       mapCtx.arc(n.x, n.y, n.r + 4 / v.k, 0, Math.PI * 2);
       mapCtx.stroke();
@@ -1252,7 +1257,9 @@ function mapDraw() {
   mapCtx.textBaseline = "top";
   for (const n of mapState.nodes) {
     const isFocus = n === hovered || n === selected;
-    if (!showLabels && !isFocus) continue;
+    const hit = matching && match.has(n.id);
+    if (matching && !hit && !isFocus) continue; // greyed nodes carry no label
+    if (!showLabels && !isFocus && !hit) continue;
     const dim = dimming && n !== selected && !(activeSet && activeSet.has(n.id));
     if (dim && !isFocus) continue;
     mapCtx.fillStyle = isFocus ? ink : inkMuted;
@@ -1322,13 +1329,54 @@ function rebuildMapSim(graphData) {
   mapState.alpha = 1;
   mapState.selected = null;
   mapState.hovered = null;
+  mapState.match = null;
+  mapSearchEl.value = "";
   mapResize();
   for (let i = 0; i < 700; i++) mapTick();
   mapFitToView();
-  const childLinks = edges.filter((e) => e.child).length;
-  mapStatsEl.textContent = `${nodes.length} wikis · ${edges.length} links` + (childLinks ? ` (${childLinks} hub→child, thick; ringed = hub)` : "");
+  mapStatsEl.textContent = mapStatsText();
   mapDraw();
 }
+
+// Map search: same engine as the Search page (search_vault); wikis that don't match turn grey.
+const mapSearchEl = document.querySelector("#map-search");
+let mapSearchSeq = 0;
+function mapStatsText() {
+  const n = mapState.nodes.length;
+  if (mapState.match) return `${mapState.match.size} of ${n} wikis match`;
+  const childLinks = mapState.edges.filter((e) => e.child).length;
+  return `${n} wikis · ${mapState.edges.length} links` + (childLinks ? ` (${childLinks} hub→child, thick; ringed = hub)` : "");
+}
+async function runMapSearch() {
+  const query = mapSearchEl.value.trim();
+  const seq = ++mapSearchSeq;
+  if (!query) {
+    mapState.match = null;
+  } else {
+    let results = [];
+    try {
+      results = await invoke("search_vault", { query, family: null });
+    } catch {
+      results = [];
+    }
+    if (seq !== mapSearchSeq) return; // stale: user kept typing
+    const stems = new Set(results.map((r) => r.path.split(/[\\/]/).pop().replace(/\.md$/i, "")));
+    mapState.match = new Set(mapState.nodes.filter((n) => stems.has(n.id)).map((n) => n.id));
+  }
+  mapStatsEl.textContent = mapStatsText();
+}
+let mapSearchTimer;
+mapSearchEl.addEventListener("input", () => {
+  clearTimeout(mapSearchTimer);
+  mapSearchTimer = setTimeout(runMapSearch, 150);
+});
+mapSearchEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && mapSearchEl.value) {
+    mapSearchEl.value = "";
+    runMapSearch();
+    e.stopPropagation();
+  }
+});
 
 // --- Link health tab: dead [[wikilinks]] and orphan pages, with a scoped "Fix with Claude" per row. ---
 const mapTabGraph = document.querySelector("#map-tab-graph");
@@ -1347,6 +1395,7 @@ function showMapTab(tab) {
   mapCanvasWrap.classList.toggle("hidden", health);
   mapCaptionEl.classList.toggle("hidden", health);
   mapStatsEl.classList.toggle("hidden", health);
+  mapSearchEl.classList.toggle("hidden", health);
   mapHealthEl.classList.toggle("hidden", !health);
   if (health) renderLinkHealth();
 }
@@ -1968,9 +2017,6 @@ function renderOneDrivePage(status) {
 }
 
 async function refreshOneDrive({ manual = false } = {}) {
-  const btn = document.querySelector("#onedrive-refresh-btn");
-  btn.disabled = true;
-  btn.textContent = "Checking…";
   try {
     const before = onedriveSummary(onedriveStatus).worst;
     const status = await invoke("refresh_onedrive_status");
@@ -1984,9 +2030,6 @@ async function refreshOneDrive({ manual = false } = {}) {
     }
   } catch (e) {
     toast(`Couldn't check OneDrive: ${e}`, { error: true });
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Refresh";
   }
 }
 
@@ -2103,7 +2146,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     localStorage.setItem(ODSNOOZE, String(Date.now() + 864e5));
     onedriveBanner.classList.add("hidden");
   });
-  document.querySelector("#onedrive-refresh-btn").addEventListener("click", () => refreshOneDrive({ manual: true }));
   document.querySelector("#onedrive-cards").addEventListener("click", async (e) => {
     const act = e.target.closest("[data-od]")?.dataset.od;
     if (act === "open") invoke("open_onedrive").catch((err) => toast(`${err}`, { error: true }));
@@ -2150,6 +2192,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     reindexBtn.disabled = true;
     invoke("reindex_now");
     if (!pipelineView.classList.contains("hidden")) loadPipeline(); // header Refresh also reloads Market Intel
+    else preloadPipeline(); // and the sidebar badge, which otherwise waits for the hourly reload
+    if (!document.querySelector("#onedrive-view").classList.contains("hidden")) refreshOneDrive({ manual: true }); // and re-checks OneDrive
     invoke("refresh_plugin_drift").then(renderSkillsBadge);
     renderLinkHealth(); // reads the wikis folder directly, so it also updates the tab's count badge
   });
@@ -2282,7 +2326,7 @@ function renderPipeline() {
   if (active.length && !qd.dataset.seen) { qd.open = true; qd.dataset.seen = "1"; }
   document.querySelector("#pipeline-queues").innerHTML = active.map((q) => `<div class="pl-q"><span>${escapeHtml(q.name)}</span><span class="muted">${q.pending} waiting</span><button class="topbar-btn" data-run="/${escapeHtml(q.skill)}">Process</button></div>`).join("") + (status.queues_skipped ? `<div class="muted">Some queues are owner machine only.</div>` : "");
   const labels = { wl: "1 · Win/Loss/Churn", pmd: "2 · PMDs", comp: "3 · Competitive" };
-  document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${stale(k)}</i></button>`).join("");
+  document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${k === "comp" ? compTabCount(tabs.comp, status.competitors_added, status.competitors_watch) : stale(k)}</i></button>`).join("");
   const list = tabs[plTab], need = list.filter((o) => o.stale);
   const newWhat = { wl: "new win/loss/churn records", pmd: "new stories, NPS responses and win/loss records", comp: "new records about this competitor" }[plTab];
   const asg = (o) => (plTab === "pmd" ? plData.assignments?.[o.name.replace(/^PMD:\s*/, "")] : null);
@@ -2290,8 +2334,37 @@ function renderPipeline() {
   const row = (o) => { const p = plData.paths?.[o.name]; return `<div class="pl-row" ${p ? `data-doc="${escapeHtml(p)}" title="Double-click to open"` : ""}><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${people(asg(o))}<div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div><div class="pl-acts">${p ? `<button class="topbar-btn" data-openbtn="${escapeHtml(p)}" title="Open the markdown">Open</button><button class="topbar-btn" data-folder="${escapeHtml(p)}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : ""}${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div></div>`; };
   const ordered = [...need, ...list.filter((o) => !o.stale)];
   const shown = planSearch(ordered, plQuery[plTab], plTab, plData.assignments);
-  rows.innerHTML = (plTab === "pmd" && plData.assignments_as_of ? `<div class="muted pl-pm">PM and PMM as of the Confluence Product Area Assignments page, ${escapeHtml(plData.assignments_as_of)}.</div>` : "") + (plTab in plQuery ? `<input id="pl-pmd-q" type="search" placeholder="${plTab === "pmd" ? "Search by keyword, PMD name, product manager or product marketing manager..." : "Search by name..."}" value="${escapeHtml(plQuery[plTab])}">` : "") + (shown.map(row).join("") || `<div class="muted">Nothing here.</div>`);
+  rows.innerHTML = (plTab === "pmd" && plData.assignments_as_of ? `<div class="muted pl-pm">PM and PMM as of the Confluence Product Area Assignments page, ${escapeHtml(plData.assignments_as_of)}.</div>` : "") + (plTab in plQuery ? `<input id="pl-pmd-q" type="search" placeholder="${plTab === "pmd" ? "Search by keyword, PMD name, product manager or product marketing manager..." : "Search by name..."}" value="${escapeHtml(plQuery[plTab])}">` : "") + (plTab === "comp" ? compHtml(tabs.comp, status, plQuery.comp) : (shown.map(row).join("") || `<div class="muted">Nothing here.</div>`));
   renderVoc();
+}
+
+// Competitive tab, top to bottom: Landscape map, Primary cards, Other competitors (added ones mixed in), Watching last.
+// Search filters every section. Actions are the existing data-run / data-openbtn / data-folder hooks.
+function compHtml(comp, status, q = "") {
+  const s = compSections(comp, { profiles: plData.competitor_profiles, added: status.competitors_added ?? [], watch: status.competitors_watch ?? [] });
+  const ok = (name) => planSearch([{ name }], q, "comp").length > 0;
+  const path = (name) => plData.paths?.[name];
+  const sec = (title, n) => `<div class="pl-sec">${title}${n === "" ? "" : ` <i>${n}</i>`}</div>`;
+  const update = (o) => (o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : "");
+  const open = (o) => (path(o.name) ? `<button class="topbar-btn" data-openbtn="${escapeHtml(path(o.name))}" title="Open the markdown">Open</button><button class="topbar-btn" data-folder="${escapeHtml(path(o.name))}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : "");
+  const records = (o) => (o.output_date ? `${o.new_upstream} new records since ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale");
+  const card = ({ o, profile }) => `<div class="pl-pcard"><div class="nm">${escapeHtml(profile.name)} <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span></div><div class="pl-prof">${escapeHtml(competitorLine(profile))}</div><div class="muted">${records(o)}</div><div class="pl-acts">${open(o)}${update(o)}</div></div>`;
+  const other = ({ o, profile, added }) => (added
+    ? `<div class="pl-row"><div><b>${escapeHtml(added.name)}</b> <span class="pl-dot"></span><span class="muted">not yet researched</span><div class="muted">Added ${escapeHtml(added.date)} · ${added.queued ?? 0} queued item${added.queued === 1 ? "" : "s"} waiting for the first report</div></div><div class="pl-acts"><button class="topbar-btn" data-run="${escapeHtml(`/sc-competitor-research ${added.name}`)}">Run research</button></div></div>`
+    : `<div class="pl-row" ${path(o.name) ? `data-doc="${escapeHtml(path(o.name))}" title="Double-click to open"` : ""}><div><b>${escapeHtml(compName(o.name))}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${profile ? `<div class="pl-prof">${escapeHtml(competitorLine(profile))}</div>` : ""}<div class="muted">${records(o)}</div></div><div class="pl-acts">${open(o)}${update(o)}</div></div>`);
+  const watch = (w) => {
+    const go = watchReady(w), n = w.mentions ?? 0;
+    const prompt = `Promote ${w.name} from the watch list: set competitors/_queue/_proposals/${w.slug}.md to status added per queue-triage.md, then run /sc-competitor-research ${w.name}`;
+    return `<div class="pl-row"><div><b>${escapeHtml(w.name)}</b> <span class="pl-rec ${go ? "go" : "keep"}">${go ? "Recommend: promote" : "Keep watching"}</span><div class="muted">${n} independent mention${n === 1 ? "" : "s"} · ${go ? "meets the add criterion" : "below the add criterion"}</div></div><div class="pl-acts"><button class="topbar-btn" data-run="${escapeHtml(prompt)}">${go ? "Promote" : "Promote anyway"}</button></div></div>`;
+  };
+  const mp = s.map.filter((x) => ok(compName(x.o.name))), pr = s.primary.filter((x) => ok(x.profile.name)),
+    ot = s.other.filter((x) => ok(x.added ? x.added.name : compName(x.o.name))), wa = s.watching.filter((w) => ok(w.name));
+  const parts = [];
+  for (const x of mp) parts.push(sec("Landscape map", "") + `<div class="pl-map"><div style="flex:1"><b>Competitive landscape map</b><div class="muted">${records(x.o)}</div></div><div class="pl-acts">${open(x.o)}${update(x.o)}</div></div>`);
+  if (pr.length) parts.push(sec("Primary competitors", pr.length) + `<div class="pl-primary">${pr.map(card).join("")}</div>`);
+  if (ot.length) parts.push(sec("Other competitors", ot.length) + ot.map(other).join(""));
+  if (wa.length) parts.push(sec("Watching, not yet tracked", wa.length) + wa.slice(0, 3).map(watch).join("") + (wa.length > 3 ? `<details class="pl-more"><summary class="muted">Show all ${wa.length - 3} more</summary>${wa.slice(3).map(watch).join("")}</details>` : ""));
+  return parts.join("") || `<div class="muted">Nothing here.</div>`;
 }
 
 const plDays = (d) => Math.max(0, Math.round((Date.now() - Date.parse(d)) / 864e5));

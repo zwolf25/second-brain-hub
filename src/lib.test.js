@@ -181,3 +181,52 @@ test("planSearch: PMD search hits PM, PMM and summary; Competitive is name only"
   assert.equal(planSearch(outs, "casey", "comp", asg).length, 0);
   assert.equal(planSearch(outs, "  ", "pmd", asg).length, 2);
 });
+
+import { compName, profileFor, competitorLine, compSections, compTabCount, compActionCount } from "./lib.js";
+
+test("compName drops the Battlecard prefix and leaves other names alone", () => {
+  assert.equal(compName("Battlecard: Corrigo"), "Corrigo");
+  assert.equal(compName("Landscape map"), "Landscape map");
+});
+
+test("profileFor matches the folder name, honouring a folder field; unknown names get null", () => {
+  const profiles = { _about: "x", Fexa: { folder: "fexa", primary: true }, BobDesk: { primary: false } };
+  assert.equal(profileFor(profiles, "Battlecard: fexa").name, "Fexa");
+  assert.equal(profileFor(profiles, "Battlecard: BobDesk").primary, false);
+  assert.equal(profileFor(profiles, "Battlecard: Limble"), null);
+  assert.equal(profileFor(undefined, "Battlecard: Corrigo"), null);
+});
+
+test("competitorLine shows not stated for missing values and nothing without a profile", () => {
+  assert.equal(competitorLine({ verticals: ["Retail", "QSR"], geos: ["United States"] }), "Verticals: Retail, QSR · Geo: United States");
+  assert.equal(competitorLine({ verticals: [], geos: null }), "Verticals: not stated · Geo: not stated");
+  assert.equal(competitorLine(null), "");
+});
+
+test("compSections: map on top, primary split out, added mixed into Other after stale rows, watching last", () => {
+  const outs = [
+    { name: "Landscape map", stale: false },
+    { name: "Battlecard: Limble", stale: false },
+    { name: "Battlecard: Infraspeak", stale: true },
+    { name: "Battlecard: fexa", stale: true },
+  ];
+  const profiles = { Fexa: { folder: "fexa", primary: true, verticals: ["Retail"], geos: ["United States"] }, Limble: { verticals: ["SMB"], geos: null } };
+  const added = [{ name: "Facility Pilot", date: "2026-11-27", queued: 1 }];
+  const watch = [{ name: "Umbrava", meets_add_criterion: false }, { name: "JobLogic", meets_add_criterion: true }];
+  const s = compSections(outs, { profiles, added, watch });
+  assert.deepEqual(s.map.map((x) => x.o.name), ["Landscape map"]);
+  assert.deepEqual(s.primary.map((x) => x.profile.name), ["Fexa"]);
+  assert.deepEqual(s.other.map((x) => x.o?.name ?? x.added.name), ["Battlecard: Infraspeak", "Facility Pilot", "Battlecard: Limble"]);
+  assert.deepEqual(s.watching.map((w) => w.name), ["JobLogic", "Umbrava"]);
+});
+
+test("competitive tab count and sidebar badge include added and promotable watch items only", () => {
+  const outs = [{ name: "Battlecard: A", stale: true }, { name: "Battlecard: B", stale: false }];
+  const added = [{ name: "Zoho" }, { name: "OpenWrench" }];
+  const watch = [{ name: "JobLogic", meets_add_criterion: true }, { name: "mPulse", meets_add_criterion: false }];
+  assert.equal(compActionCount(added, watch), 3);
+  assert.equal(compTabCount(outs, added, watch), 4);
+  assert.equal(compTabCount(outs), 1);
+  assert.equal(pipelineBadgeCount({ queues: [], outputs: [], competitors_added: added, competitors_watch: watch }), 3);
+  assert.equal(pipelineBadgeCount({ queues: [{ pending: 2 }], outputs: [{ stale: true }] }), 3); // unchanged without the new fields
+});

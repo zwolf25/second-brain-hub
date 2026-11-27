@@ -185,7 +185,52 @@ export const NAV_KEYS = { 1: "search", 2: "transcripts", 3: "skills", 4: "map", 
 // Number on the Market Intel menu row: items waiting in queues plus stale outputs.
 export function pipelineBadgeCount(status) {
   if (!status) return 0;
-  return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length;
+  return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length
+    + compActionCount(status.competitors_added, status.competitors_watch);
+}
+
+// ---- Market Intel Competitive tab (0.21.3). Sections: Landscape map, Primary, Other (added mixed in), Watching.
+// The vault's intel-staleness.json supplies competitors_added / competitors_watch; both default to empty.
+export const compName = (outputName) => String(outputName).replace(/^Battlecard:\s*/, "");
+
+// Profiles are keyed by display name; `folder` names the competitor folder when its spelling differs (Fexa -> fexa).
+export function profileFor(profiles = {}, outputName) {
+  const folder = compName(outputName).toLowerCase();
+  const hit = Object.entries(profiles).find(([k, p]) => !k.startsWith("_") && p && (p.folder ?? k).toLowerCase() === folder);
+  return hit ? { name: hit[0], ...hit[1] } : null;
+}
+
+// "Verticals: ... · Geo: ..." under a tracked competitor; "not stated" where the profile has no value. Empty when there is no profile.
+export function competitorLine(profile) {
+  if (!profile) return "";
+  const list = (xs) => (xs?.length ? xs.join(", ") : "not stated");
+  return `Verticals: ${list(profile.verticals)} · Geo: ${list(profile.geos)}`;
+}
+
+// Watch proposals that meet the add criterion (queue-triage.md) are the only ones that need action on the tab and in the badge.
+export const watchReady = (w) => Boolean(w?.meets_add_criterion);
+
+// Actions on the Competitive tab: added-but-not-researched plus watch items ready to promote.
+export function compActionCount(added = [], watch = []) {
+  return added.length + watch.filter(watchReady).length;
+}
+
+// Tab number = stale competitor outputs (map included) + the same action items.
+export function compTabCount(outputs = [], added = [], watch = []) {
+  return outputs.filter((o) => o.stale).length + compActionCount(added, watch);
+}
+
+// Split the competitor outputs (already stale-first from pipelineTabs) into the tab's sections.
+// Added competitors sit in Other, after the stale rows and before the current ones.
+export function compSections(outputs = [], { profiles = {}, added = [], watch = [] } = {}) {
+  const items = outputs.map((o) => ({ o, profile: profileFor(profiles, o.name) }));
+  const map = items.filter((x) => x.o.name === "Landscape map");
+  const cards = items.filter((x) => x.o.name !== "Landscape map");
+  const primary = cards.filter((x) => x.profile?.primary);
+  const rest = cards.filter((x) => !x.profile?.primary);
+  const other = [...rest.filter((x) => x.o.stale), ...added.map((a) => ({ added: a })), ...rest.filter((x) => !x.o.stale)];
+  const watching = [...watch].sort((a, b) => Number(watchReady(b)) - Number(watchReady(a)) || a.name.localeCompare(b.name));
+  return { map, primary, other, watching };
 }
 
 // Market Intel tab search: every word must match. Competitive matches the name only; PMDs also match PM, PMM, modules and summary.

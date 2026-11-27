@@ -1,1 +1,1 @@
-Opening a report, PMD or battlecard from Market Intel now counts toward the Time Savings dashboard. Market Intel also refreshes from the header button, and has an Open button on each row.
+Market Intel's Competitive tab now shows primary competitors, added competitors awaiting research, and watch items ready for promotion, each with its own action. OneDrive Heartbeat uses the header Refresh button.

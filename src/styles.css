@@ -1673,6 +1673,30 @@ label.transcripts-toggle {
 .pl-detail a { color: #396cd8; cursor: pointer; text-decoration: underline; margin-left: 0.5em; }
 .pl-detail > div:not(.pl-dv) { grid-column: 1 / -1; }
 .pl-vr select { width: 11em; max-width: 11em; text-overflow: ellipsis; font-size: 0.85em; }
+
+/* Market Intel Competitive tab sections (0.21.3) */
+.pl-sec { margin: 1.3em 0 0.2em; font-size: 0.78em; letter-spacing: 0.07em; text-transform: uppercase; color: #777; font-weight: 600; display: flex; gap: 0.6em; align-items: baseline; }
+.pl-sec i { font-style: normal; background: #ececec; color: #666; border-radius: 9px; padding: 0 7px; letter-spacing: 0; font-size: 0.95em; }
+.pl-prof { color: #555; font-size: 0.85em; margin-top: 2px; }
+.pl-primary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8em; margin-top: 0.5em; }
+.pl-pcard { background: #fff; border: 1px solid #e5e5e5; border-top: 3px solid #396cd8; border-radius: 8px; padding: 0.8em 0.9em; }
+.pl-pcard .nm { font-size: 1.05em; font-weight: 600; }
+.pl-pcard .pl-prof { margin: 0.5em 0; }
+.pl-pcard .pl-acts { display: flex; gap: 0.4em; flex-wrap: wrap; margin-top: 0.6em; }
+.pl-map { display: flex; gap: 1em; align-items: center; border: 1px solid #e5e5e5; background: #fff; border-radius: 8px; padding: 0.7em 0.9em; margin-top: 0.5em; }
+.pl-rec { border-radius: 4px; padding: 0 6px; font-size: 0.8em; margin-left: 0.4em; }
+.pl-rec.go { background: #e6f5ec; color: #1e7a45; }
+.pl-rec.keep { background: #eee; color: #555; }
+.pl-more { margin-top: 0.4em; }
+.pl-more summary { cursor: pointer; padding: 0.4em 0; }
+@media (prefers-color-scheme: dark) {
+  .pl-pcard { background: #1d232d; border-color: #2c3440; }
+  .pl-map { background: #1d232d; border-color: #2c3440; }
+  .pl-sec i { background: #2c3440; color: #aab; }
+  .pl-prof { color: #aab; }
+  .pl-rec.keep { background: #2c3440; color: #aab; }
+}
+@media (max-width: 760px) { .pl-primary { grid-template-columns: 1fr; } }
 .pl-vr > div:last-child { flex: 0 0 auto; max-width: 12em; }
 
 @media (prefers-color-scheme: dark) {
@@ -1718,3 +1742,5 @@ label.transcripts-toggle {
 .pl-row[data-doc] { cursor: pointer; }
 .pl-pm { font-size: 0.85em; }
 #pl-pmd-q { width: 100%; margin: 0.4em 0; }
+
+#map-search { flex: 1; max-width: 360px; margin-left: 0.75em; }
