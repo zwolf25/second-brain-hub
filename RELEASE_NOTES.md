@@ -1,1 +1,1 @@
-Market Intel's Competitive tab now shows primary competitors, added competitors awaiting research, and watch items ready for promotion, each with its own action. OneDrive Heartbeat uses the header Refresh button.
+The Competitive tab now lists primary competitors in their own section with verticals and geos, and added competitors awaiting research show a red dot. PMD rows count only new stories and NPS responses.

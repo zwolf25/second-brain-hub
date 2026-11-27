@@ -2,6 +2,12 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.21.4
+- **Primary competitors now show in their own section.** The Competitive tab read profiles from the wrong place (`plData.competitor_profiles`, which `PipelineData` never carries), so no competitor was primary and the Verticals/Geo lines were missing. It now reads `competitor_profiles` from the status JSON. Code: `compHtml` in `src/main.js`.
+- **Added, not yet researched competitors show a red dot.** They already counted toward the Competitive tab badge; the dot was grey.
+- **PMD row no longer lists win/loss.** The label now reads "new stories and NPS responses", matching the vault change that stopped counting win/loss records per PMD (they have no module tag; a bulk re-ingest had made 2,434 of them look new).
+- Not verified in the running app. The primary-section fix was checked by reading the data through the library functions, not by viewing the page.
+
 ## 0.21.3
 - **Market Intel Competitive tab restructured.** Four sections, top to bottom: Landscape map; Primary competitors (larger cards with verticals and geo); Other competitors (name without "Battlecard:", a Verticals/Geo line, and added-but-not-researched competitors mixed in with a Run research button); Watching, not yet tracked last (Promote, or Promote anyway below the add criterion; the first three show, the rest sit behind Show all). The tab count and the menu badge count the stale cards plus added competitors plus watch items that meet the criterion. `compSections`, `compTabCount`, `compActionCount`, `profileFor`, `competitorLine` in `lib.js`, tested. Queues block unchanged.
 - **Vault data feeds the tab.** `intel-staleness.py` emits `competitors_added` (with `queued`, `date`), `competitors_watch` (with `slug`, `mentions`, `meets_add_criterion`, optional `mentions_note`) and per-competitor `win_loss` and `churn` counts in `competitor_profiles`. `competitors/competitor-profiles.json` holds primary flags, verticals, geos and aliases; `_watch_mentions` overrides a watch item's mention count when a human has checked it.

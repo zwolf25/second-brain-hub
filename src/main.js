@@ -2328,7 +2328,7 @@ function renderPipeline() {
   const labels = { wl: "1 · Win/Loss/Churn", pmd: "2 · PMDs", comp: "3 · Competitive" };
   document.querySelector("#pipeline-tabs").innerHTML = Object.keys(labels).map((k) => `<button class="pl-tab ${k === plTab ? "on" : ""}" data-tab="${k}">${labels[k]} <i>${k === "comp" ? compTabCount(tabs.comp, status.competitors_added, status.competitors_watch) : stale(k)}</i></button>`).join("");
   const list = tabs[plTab], need = list.filter((o) => o.stale);
-  const newWhat = { wl: "new win/loss/churn records", pmd: "new stories, NPS responses and win/loss records", comp: "new records about this competitor" }[plTab];
+  const newWhat = { wl: "new win/loss/churn records", pmd: "new stories and NPS responses",comp: "new records about this competitor" }[plTab];
   const asg = (o) => (plTab === "pmd" ? plData.assignments?.[o.name.replace(/^PMD:\s*/, "")] : null);
   const people = (a) => (a ? `<div class="muted pl-pm">PM: ${escapeHtml(a.pm?.join(", ") || "none listed")} · PMM: ${escapeHtml(a.pmm?.join(", ") || "none listed")}${a.check ? " (to confirm)" : ""}</div>` : "");
   const row = (o) => { const p = plData.paths?.[o.name]; return `<div class="pl-row" ${p ? `data-doc="${escapeHtml(p)}" title="Double-click to open"` : ""}><div><b>${escapeHtml(o.name)}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${people(asg(o))}<div class="muted">${o.output_date ? `${o.new_upstream} ${newWhat} since this was last updated on ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale"}</div></div><div class="pl-acts">${p ? `<button class="topbar-btn" data-openbtn="${escapeHtml(p)}" title="Open the markdown">Open</button><button class="topbar-btn" data-folder="${escapeHtml(p)}" title="Show the folder with the markdown, docx and notes">Show folder</button>` : ""}${o.stale ? `<button class="topbar-btn" data-run="/${escapeHtml(o.refresh)}">Update</button>` : ""}</div></div>`; };
@@ -2341,7 +2341,7 @@ function renderPipeline() {
 // Competitive tab, top to bottom: Landscape map, Primary cards, Other competitors (added ones mixed in), Watching last.
 // Search filters every section. Actions are the existing data-run / data-openbtn / data-folder hooks.
 function compHtml(comp, status, q = "") {
-  const s = compSections(comp, { profiles: plData.competitor_profiles, added: status.competitors_added ?? [], watch: status.competitors_watch ?? [] });
+  const s = compSections(comp, { profiles: status.competitor_profiles ?? {}, added: status.competitors_added ?? [], watch: status.competitors_watch ?? [] });
   const ok = (name) => planSearch([{ name }], q, "comp").length > 0;
   const path = (name) => plData.paths?.[name];
   const sec = (title, n) => `<div class="pl-sec">${title}${n === "" ? "" : ` <i>${n}</i>`}</div>`;
@@ -2350,7 +2350,7 @@ function compHtml(comp, status, q = "") {
   const records = (o) => (o.output_date ? `${o.new_upstream} new records since ${escapeHtml(o.output_date)}` : "no update date found, so treated as stale");
   const card = ({ o, profile }) => `<div class="pl-pcard"><div class="nm">${escapeHtml(profile.name)} <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span></div><div class="pl-prof">${escapeHtml(competitorLine(profile))}</div><div class="muted">${records(o)}</div><div class="pl-acts">${open(o)}${update(o)}</div></div>`;
   const other = ({ o, profile, added }) => (added
-    ? `<div class="pl-row"><div><b>${escapeHtml(added.name)}</b> <span class="pl-dot"></span><span class="muted">not yet researched</span><div class="muted">Added ${escapeHtml(added.date)} · ${added.queued ?? 0} queued item${added.queued === 1 ? "" : "s"} waiting for the first report</div></div><div class="pl-acts"><button class="topbar-btn" data-run="${escapeHtml(`/sc-competitor-research ${added.name}`)}">Run research</button></div></div>`
+    ? `<div class="pl-row"><div><b>${escapeHtml(added.name)}</b> <span class="pl-dot stale"></span><span class="muted">not yet researched</span><div class="muted">Added ${escapeHtml(added.date)} · ${added.queued ?? 0} queued item${added.queued === 1 ? "" : "s"} waiting for the first report</div></div><div class="pl-acts"><button class="topbar-btn" data-run="${escapeHtml(`/sc-competitor-research ${added.name}`)}">Run research</button></div></div>`
     : `<div class="pl-row" ${path(o.name) ? `data-doc="${escapeHtml(path(o.name))}" title="Double-click to open"` : ""}><div><b>${escapeHtml(compName(o.name))}</b> <span class="pl-dot ${o.stale ? "stale" : "fresh"}"></span><span class="muted">${o.stale ? "stale" : "current"}</span>${profile ? `<div class="pl-prof">${escapeHtml(competitorLine(profile))}</div>` : ""}<div class="muted">${records(o)}</div></div><div class="pl-acts">${open(o)}${update(o)}</div></div>`);
   const watch = (w) => {
     const go = watchReady(w), n = w.mentions ?? 0;
