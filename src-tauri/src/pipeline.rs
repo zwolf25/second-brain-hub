@@ -3,6 +3,8 @@
 //! marker file per candidate under `win-loss/_voc/` (owner decision 2026-11-23: the Hub writes these markers).
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Contact {
@@ -280,6 +282,66 @@ pub fn load(root: &Path) -> PipelineData {
     PipelineData { status_json, voc, paths, assignments, assignments_as_of }
 }
 
+/// Reruns the staleness detector and replaces `_status/intel-staleness.json`, on the owner's machine only
+/// (`c4`, the crawl4ai folder, exists). `Ok(false)`: not the owner, nothing ran. On `Err` the old JSON is left alone.
+/// Runs the detector alone, not `pipeline_status.py`: that shares temp names with its scheduled run, can double a
+/// ledger line, and exits 0 when the detector fails.
+pub fn recheck(root: &Path, c4: &Path, timeout: Duration) -> Result<bool, String> {
+    if !c4.is_dir() {
+        return Ok(false);
+    }
+    let dir = root.join("_status");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Own temp name, so a scheduled run (`.intel-staleness.json.tmp`) can never collide with this one.
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let tmp = dir.join(format!(".intel-staleness.hub-{}-{nanos}.tmp", std::process::id()));
+    let result = run_detector(root, c4, &tmp, timeout)
+        .and_then(|()| check_output(&tmp))
+        .and_then(|()| std::fs::rename(&tmp, dir.join("intel-staleness.json")).map_err(|e| e.to_string()));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map(|()| true)
+}
+
+/// stdout goes straight to the temp file, so a large result can never fill a pipe and stall the wait loop.
+fn run_detector(root: &Path, c4: &Path, out: &Path, timeout: Duration) -> Result<(), String> {
+    let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    // Same interpreter as the com.sb.pipeline.status LaunchAgent; a GUI app's PATH is not the shell's.
+    let mut child = Command::new(c4.join(".venv/bin/python"))
+        .arg("-I")
+        .arg(root.join("skills-repo/sc-win-loss/shared/intel-staleness.py"))
+        .arg("--json")
+        .env("SECOND_BRAIN_ROOT", root)
+        .env("CRAWL4AI_DIR", c4)
+        .stdin(Stdio::null())
+        .stdout(file)
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("could not start Python: {e}"))?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(s) if s.success() => return Ok(()),
+            Some(s) => return Err(format!("the staleness script failed ({s})")),
+            None if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("the staleness script took longer than {} s", timeout.as_secs()));
+            }
+            None => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+}
+
+/// Only a complete owner-side result may replace the saved one.
+fn check_output(path: &Path) -> Result<(), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("the staleness script returned bad JSON: {e}"))?;
+    let complete = v["generated"].is_string() && v["outputs"].is_array() && v["queues"].is_array() && v["mtime_checks_skipped"] == false;
+    complete.then_some(()).ok_or_else(|| "the staleness script returned an incomplete result".to_string())
+}
+
 /// kind: "claim" | "requested" | "declined"; `value` empty removes the marker (Release / Undo).
 pub fn set_marker(root: &Path, key: &str, kind: &str, value: &str) -> Result<(), String> {
     if !matches!(kind, "claim" | "requested" | "declined") || key.is_empty() || key.contains(['/', '\\', '.']) {
@@ -380,5 +442,99 @@ mod tests {
         assert_eq!(p2.voc[0].declined, "Auto: Timing");
         assert_eq!((p2.voc[0].raw_amount, p2.voc[0].sfdc_url.as_str()), (Some(9000000.0), "https://x/o"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+/// Fixture vault and fake crawl4ai folder only; never the live shared vault. `.venv/bin/python` is a link to the system Python.
+#[cfg(all(test, unix))]
+mod recheck_tests {
+    use super::*;
+
+    const OLD: &str = r#"{"generated":"2020-01-01T00:00:00Z","outputs":[]}"#;
+    const GOOD: &str = r#"print('{"generated":"2026-11-27T00:00:00Z","outputs":[],"queues":[],"mtime_checks_skipped":false}')"#;
+
+    fn system_python() -> std::path::PathBuf {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap()).map(|d| d.join("python3")).find(|p| p.is_file()).expect("python3 on PATH")
+    }
+
+    fn fixture(script: &str) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let (root, c4) = (d.path().join("vault"), d.path().join("crawl4ai"));
+        std::fs::create_dir_all(root.join("_status")).unwrap();
+        std::fs::create_dir_all(root.join("skills-repo/sc-win-loss/shared")).unwrap();
+        std::fs::create_dir_all(c4.join(".venv/bin")).unwrap();
+        std::os::unix::fs::symlink(system_python(), c4.join(".venv/bin/python")).unwrap();
+        std::fs::write(root.join("skills-repo/sc-win-loss/shared/intel-staleness.py"), script).unwrap();
+        std::fs::write(root.join("_status/intel-staleness.json"), OLD).unwrap();
+        (d, root, c4)
+    }
+
+    fn saved(root: &Path) -> String {
+        std::fs::read_to_string(root.join("_status/intel-staleness.json")).unwrap()
+    }
+
+    fn status_files(root: &Path) -> usize {
+        std::fs::read_dir(root.join("_status")).unwrap().count()
+    }
+
+    #[test]
+    fn success_replaces_the_json_and_leaves_no_temp_file() {
+        let (_d, root, c4) = fixture(GOOD);
+        assert_eq!(recheck(&root, &c4, Duration::from_secs(30)), Ok(true));
+        assert!(saved(&root).contains("2026-11-27"));
+        assert_eq!(status_files(&root), 1);
+    }
+
+    #[test]
+    fn every_failure_keeps_the_old_json_and_leaves_no_temp_file() {
+        for (script, secs) in [
+            ("print('{'); raise SystemExit(1)", 30),
+            ("print('not json')", 30),
+            ("print('{}')", 30),
+            (r#"print('{"generated":"x","outputs":[],"queues":null,"mtime_checks_skipped":true}')"#, 30),
+            ("import time; time.sleep(30)", 1),
+        ] {
+            let (_d, root, c4) = fixture(script);
+            assert!(recheck(&root, &c4, Duration::from_secs(secs)).is_err(), "{script}");
+            assert_eq!(saved(&root), OLD, "{script}");
+            assert_eq!(status_files(&root), 1, "{script}");
+        }
+        let (_d, root, c4) = fixture(GOOD);
+        std::fs::remove_file(c4.join(".venv/bin/python")).unwrap();
+        assert!(recheck(&root, &c4, Duration::from_secs(30)).is_err());
+        assert_eq!(saved(&root), OLD);
+    }
+
+    #[test]
+    fn without_crawl4ai_nothing_runs() {
+        let (d, root, _c4) = fixture("open(__file__ + '.ran', 'w').close()");
+        assert_eq!(recheck(&root, &d.path().join("missing"), Duration::from_secs(30)), Ok(false));
+        assert!(!root.join("skills-repo/sc-win-loss/shared/intel-staleness.py.ran").exists());
+        assert_eq!(saved(&root), OLD);
+    }
+
+    /// Acceptance run against the real detector (it lives in the vault, so CI does not have it):
+    /// HUB_DETECTOR=<path to intel-staleness.py> cargo test real_detector -- --ignored
+    #[test]
+    #[ignore]
+    fn real_detector_clears_a_stale_battlecard_after_review() {
+        let script = std::fs::read_to_string(std::env::var("HUB_DETECTOR").expect("set HUB_DETECTOR")).unwrap();
+        let (_d, root, c4) = fixture(&script);
+        for sub in ["win-loss/records", "churn/records", "competitors/Acme"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        for i in 0..11 {
+            std::fs::write(root.join(format!("win-loss/records/r{i}.md")), "---\nprimary_competitor: \"Acme\"\n---\n").unwrap();
+        }
+        let card = |date: &str| std::fs::write(root.join("competitors/Acme/battlecard.md"), format!("# B\n\nLast reviewed: {date}\n")).unwrap();
+        let stale = || {
+            assert_eq!(recheck(&root, &c4, Duration::from_secs(60)), Ok(true));
+            let v: serde_json::Value = serde_json::from_str(&saved(&root)).unwrap();
+            v["outputs"].as_array().unwrap().iter().find(|o| o["name"] == "Battlecard: Acme").unwrap()["stale"].as_bool().unwrap()
+        };
+        card("2020-01-01");
+        assert!(stale());
+        card("2999-01-01");
+        assert!(!stale());
     }
 }

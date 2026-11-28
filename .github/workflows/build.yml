@@ -14,8 +14,7 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
 
-  # `tauri-action` builds and publishes a signed release (installers +
-  # updater's `latest.json` manifest) in one step per platform — it uploads
+  # `tauri-action` builds and publishes signed installers per platform (the `manifest` job below writes `latest.json`) — it uploads
   # directly to GitHub Release assets via the API, not through
   # actions/upload-artifact's blob storage, so it doesn't hit the
   # Zscaler-blocked artifact-storage domain that forced the old
@@ -74,3 +73,24 @@ jobs:
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
           releaseDraft: false
           prerelease: false
+          # Each platform job would write latest.json and race the others (0.21.4 lost the arm64 entry). The manifest job below writes it once.
+          uploadUpdaterJson: 'false'
+
+  # Runs after every platform has uploaded its signed installer. Writes latest.json once,
+  # so it lists all platforms (BACKLOG TD-16). Fails the run if any platform is missing.
+  manifest:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          mkdir -p sigs
+          gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -D sigs -p '*.sig'
+          node scripts/make-updater-manifest.mjs sigs "$GITHUB_REPOSITORY" "$VERSION" RELEASE_NOTES.md > latest.json
+          gh release upload "v$VERSION" latest.json -R "$GITHUB_REPOSITORY" --clobber

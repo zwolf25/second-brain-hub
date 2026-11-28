@@ -183,6 +183,15 @@ export function updateErrorText(e) {
 export const NAV_KEYS = { 1: "search", 2: "transcripts", 3: "skills", 4: "map", 5: "onedrive", 6: "pipeline", ",": "settings" };
 
 // Number on the Market Intel menu row: items waiting in queues plus stale outputs.
+// Market Intel status line. `note` is the last manual Refresh: "checking", "failed", "owner" (not this machine) or "".
+// "generated" is not the time of the last check (the scheduled job skips rewrites when only the time changed).
+export function pipelineStatusLine(generated, note, now = Date.now()) {
+  const at = `${generated.slice(0, 16).replace("T", " ")} UTC`;
+  const old = (now - Date.parse(generated)) / 36e5 > 48 ? " (older than 48 hours, owner may need to check)" : "";
+  const lead = { checking: "Checking... ", failed: "Recheck failed, showing earlier results. ", owner: "Status is calculated on the owner's machine. " }[note] ?? "";
+  return `${lead}Generated ${at}${old}`;
+}
+
 export function pipelineBadgeCount(status) {
   if (!status) return 0;
   return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length

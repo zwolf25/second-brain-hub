@@ -923,6 +923,16 @@ fn get_pipeline(state: State<Arc<AppState>>) -> Option<pipeline::PipelineData> {
     shared_root(&state).map(|r| pipeline::load(&r))
 }
 
+/// Manual header Refresh on Market Intel only. False: not the owner's machine, so nothing ran.
+#[tauri::command]
+async fn recheck_pipeline(state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    let (Some(root), Some(home)) = (shared_root(&state), std::env::var_os("HOME")) else { return Ok(false) };
+    let c4 = PathBuf::from(home).join("Projects/crawl4ai");
+    tauri::async_runtime::spawn_blocking(move || pipeline::recheck(&root, &c4, std::time::Duration::from_secs(120)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Display name from this user's Second Brain roster profile (inbox/_roster/<slug>.md); None means Claim stays disabled.
 #[tauri::command]
 fn get_claim_name() -> Option<String> {
@@ -1187,7 +1197,7 @@ pub fn run() {
             render_markdown,
             can_edit_markdown,
             get_link_health,
-            get_pipeline, get_claim_name,
+            get_pipeline, recheck_pipeline, get_claim_name,
             set_voc_marker,
             read_for_edit,
             write_for_edit,

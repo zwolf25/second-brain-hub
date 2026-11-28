@@ -1,4 +1,4 @@
-import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount, planSearch, compSections, compTabCount, compName, competitorLine, watchReady } from "./lib.js";
+import { STALE_DAYS, fuzzyScore, escapeHtml, formatUpdated, isStale, topicValues, filterByTopic, sortResults, onedriveSummary, onedriveDetails, pipelineTabs, vocPriority, vocVisible , vocBuild, vocType, vocValue, vocMoney, vocShown, updateErrorText, vocDaysLeft, VOC_TYPES, NAV_KEYS, pipelineBadgeCount, planSearch, compSections, compTabCount, compName, competitorLine, watchReady, pipelineStatusLine } from "./lib.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -216,7 +216,7 @@ setDefaultHandlerBtn.addEventListener("click", async () => {
 });
 
 openOsDefaultSettingsBtn.addEventListener("click", () => {
-  openUrl("ms-settings:defaultapps").catch((e) => alert(`Couldn't open Settings:\n${e}`));
+  openUrl("ms-settings:defaultapps").catch((e) => notifyError(`Couldn't open Settings:\n${e}`));
 });
 
 // Every top-level section toggles through this one helper instead of each
@@ -281,6 +281,9 @@ let transcriptsNoticeTimer = null;
 function applyTranscriptsNav(config) {
   document.querySelector("#transcripts-btn").classList.toggle("hidden", !!config.hide_transcripts_page);
 }
+
+// Every failure goes through this (not alert()): same toast channel as successes, so errors look like the rest of the app.
+const notifyError = (msg) => toast(msg, { error: true });
 
 // One feedback channel for every action: a toast stays until clicked or ~8 s (the old 4 s
 // status-bar note was easy to miss, so a successful Move looked like nothing happened).
@@ -918,7 +921,7 @@ async function openInViewer(path, returnTo = "search", opts = {}) {
   try {
     doc = await invoke("render_markdown", { path });
   } catch (e) {
-    alert(`Couldn't open file:\n${path}\n\n${e}`);
+    notifyError(`Couldn't open file:\n${path}\n\n${e}`);
     return;
   }
   currentViewerPath = doc.source_path;
@@ -2089,7 +2092,7 @@ async function installUpdate() {
     await relaunch();
   } catch (e) {
     setBtns(false, "Update & Restart");
-    alert(`Couldn't install the update:\n${e}`);
+    notifyError(`Couldn't install the update:\n${e}`);
   }
 }
 updateBtns.forEach((b) => b.addEventListener("click", installUpdate));
@@ -2100,7 +2103,7 @@ updateBtns.forEach((b) => b.addEventListener("click", installUpdate));
 // is needed (same fix already proven in the ZacAI Dashboard's own deep links).
 function launchClaudeCommand(command) {
   const url = `claude://code/new?q=${encodeURIComponent(command)}`;
-  openUrl(url).catch((e) => alert(`Couldn't open Claude Desktop:\n${e}`));
+  openUrl(url).catch((e) => notifyError(`Couldn't open Claude Desktop:\n${e}`));
 }
 
 rawBadge.addEventListener("click", () => launchClaudeCommand("/wiki-builder"));
@@ -2115,7 +2118,7 @@ sharedRawBadge.addEventListener("click", async () => {
 
 // Bare `claude://code/new` — no `q`, opens a fresh session with nothing pre-filled.
 document.querySelector("#new-session-btn").addEventListener("click", () => {
-  openUrl("claude://code/new").catch((e) => alert(`Couldn't open Claude Desktop:\n${e}`));
+  openUrl("claude://code/new").catch((e) => notifyError(`Couldn't open Claude Desktop:\n${e}`));
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -2191,7 +2194,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     loadingOverlay.classList.remove("hidden");
     reindexBtn.disabled = true;
     invoke("reindex_now");
-    if (!pipelineView.classList.contains("hidden")) loadPipeline(); // header Refresh also reloads Market Intel
+    if (!pipelineView.classList.contains("hidden")) recheckPipeline(); // header Refresh also rechecks Market Intel
     else preloadPipeline(); // and the sidebar badge, which otherwise waits for the hourly reload
     if (!document.querySelector("#onedrive-view").classList.contains("hidden")) refreshOneDrive({ manual: true }); // and re-checks OneDrive
     invoke("refresh_plugin_drift").then(renderSkillsBadge);
@@ -2275,18 +2278,33 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   document.querySelector("#viewer-open-external-btn").addEventListener("click", () => {
     if (currentViewerPath) {
-      openPath(currentViewerPath).catch((e) => alert(`Couldn't open file:\n${currentViewerPath}\n\n${e}`));
+      openPath(currentViewerPath).catch((e) => notifyError(`Couldn't open file:\n${currentViewerPath}\n\n${e}`));
     }
   });
 });
 
 
 // ---- Pipeline page (reads _status/intel-staleness.json and win-loss/interview-wishlist.md; Run opens Claude) ----
-let plData = null, plTab = "wl", plQuery = { pmd: "", comp: "" }, plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plVocMine = false, plClaimName = null, plOpen = new Set();
+let plData = null, plNote = "", plTab = "wl", plQuery = { pmd: "", comp: "" }, plVocFilter = "all", plVocQuery = "", plVocServices = false, plVocSort = "priority", plVocMine = false, plClaimName = null, plOpen = new Set();
 
 async function showPipelineView() {
   showView("pipeline");
   toggleMenu(false);
+  if (plNote !== "checking") plNote = "";
+  await loadPipeline();
+}
+
+// Manual header Refresh only: on the owner's machine, recompute staleness before reloading. Old rows stay up meanwhile.
+async function recheckPipeline() {
+  if (plNote === "checking") return;
+  plNote = "checking";
+  if (plData?.status_json) renderPipeline();
+  try {
+    plNote = (await invoke("recheck_pipeline")) ? "" : "owner";
+  } catch (e) {
+    plNote = "failed";
+    notifyError(`Recheck failed:\n${e}`);
+  }
   await loadPipeline();
 }
 
@@ -2312,8 +2330,7 @@ function renderPipeline() {
     rows.innerHTML = ""; document.querySelector("#pipeline-tabs").innerHTML = ""; document.querySelector("#voc-box").classList.add("hidden");
     return;
   }
-  const ageH = (Date.now() - Date.parse(status.generated)) / 36e5;
-  document.querySelector("#pipeline-generated").textContent = `Updated ${status.generated.slice(0, 16).replace("T", " ")} UTC${ageH > 48 ? " (older than 48 hours, owner may need to check)" : ""}`;
+  document.querySelector("#pipeline-generated").textContent = pipelineStatusLine(status.generated, plNote);
   const tabs = pipelineTabs(status.outputs);
   const stale = (k) => tabs[k].filter((o) => o.stale).length;
   renderPipelineBadge();
@@ -2476,7 +2493,7 @@ function renderVoc() {
 
 const VOC_REASONS = ["Already covered by a VoC", "Not a real buying decision", "Deal too small", "No contact or too sensitive", "Other"];
 async function setVocMarker(key, kind, value) {
-  await invoke("set_voc_marker", { key, kind, value }).catch((e) => alert(`Couldn't save: ${e}`));
+  await invoke("set_voc_marker", { key, kind, value }).catch((e) => notifyError(`Couldn't save: ${e}`));
   await loadPipeline();
 }
 
@@ -2488,10 +2505,10 @@ function openIntel(path) {
 pipelineView.addEventListener("click", (e) => {
   const t = e.target, d = (k) => t.closest(`[data-${k}]`)?.dataset[k];
   if (d("openbtn")) return openIntel(d("openbtn"));
-  if (d("folder")) return revealItemInDir(d("folder")).catch((e) => alert(`Couldn't show the folder:\n${e}`));
+  if (d("folder")) return revealItemInDir(d("folder")).catch((e) => notifyError(`Couldn't show the folder:\n${e}`));
   if (d("cancel")) return renderVoc();
   if (d("unreq")) return setVocMarker(d("unreq"), "requested", "");
-  if (d("ext")) return openUrl(d("ext")).catch((e) => alert(`Couldn't open the link:\n${e}`));
+  if (d("ext")) return openUrl(d("ext")).catch((e) => notifyError(`Couldn't open the link:\n${e}`));
   if (d("run")) return launchClaudeCommand(d("run"));
   if (d("tab")) { plTab = d("tab"); return renderPipeline(); }
   if (t.closest("#vf-btn")) return vfOpen(true);

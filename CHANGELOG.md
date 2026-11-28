@@ -2,6 +2,14 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.21.5
+- **Release race fixed (BACKLOG TD-16).** 0.21.4 lost its Apple Silicon `latest.json` entry because three platform jobs wrote the same file. Now tauri-action skips the manifest (`uploadUpdaterJson: 'false'`) and a final `manifest` job in `build.yml` writes it once from the `.sig` assets, through `scripts/make-updater-manifest.mjs`. The script fails the run if any of the seven platform keys is missing. Tests: `scripts/make-updater-manifest.test.mjs` (4). The first real run of the new job is the release itself; check that the release lists all seven platforms.
+- **Refresh rechecks Market Intel.** A refreshed item stayed stale because Refresh only reread `_status/intel-staleness.json`, which a background job writes. On the owner's machine, a manual Refresh with Market Intel open now reruns `intel-staleness.py` first (about 10 s measured), showing "Checking..."; a failure or 120 s timeout keeps the old file and says so. Other machines are told status is calculated on the owner's machine. The status line now reads "Generated", not "Updated". Code: `pipeline::recheck`, `recheckPipeline`. Tests: 3 Rust fixture tests (macOS), 1 ignored acceptance test run by hand against the real script, 1 JS test.
+- **Errors are toasts, not system alerts.** Nine `alert()` calls in `src/main.js` now go through `notifyError` (the same toast as successes, red). `scripts/guards.test.mjs` fails if a bare `alert(` comes back.
+- **Update buttons name their target.** The Competitive and Pipeline Update buttons now send the full command (for example `/sc-battlecard Ecotrak`, `/sc-pmd-bulk-update --scan --modules <slug>`). Before, they sent the bare skill name, so Claude did not know which competitor or PMD. The change is in the vault's `intel-staleness.py`, not the app.
+- Stale comment in `index.html` for the OneDrive page fixed.
+- Not verified in the running app: the toast change on a real error, and the Update command text. Not verified: the manifest job on a real release (this release is the first run).
+
 ## 0.21.4
 - **Primary competitors now show in their own section.** The Competitive tab read profiles from the wrong place (`plData.competitor_profiles`, which `PipelineData` never carries), so no competitor was primary and the Verticals/Geo lines were missing. It now reads `competitor_profiles` from the status JSON. Code: `compHtml` in `src/main.js`.
 - **Added, not yet researched competitors show a red dot.** They already counted toward the Competitive tab badge; the dot was grey.

@@ -230,3 +230,14 @@ test("competitive tab count and sidebar badge include added and promotable watch
   assert.equal(pipelineBadgeCount({ queues: [], outputs: [], competitors_added: added, competitors_watch: watch }), 3);
   assert.equal(pipelineBadgeCount({ queues: [{ pending: 2 }], outputs: [{ stale: true }] }), 3); // unchanged without the new fields
 });
+
+import { pipelineStatusLine } from "./lib.js";
+
+test("pipelineStatusLine: shows the generated time, the Refresh outcome and the 48 hour warning", () => {
+  const g = "2026-11-27T12:34:56Z", now = Date.parse(g) + 36e5;
+  assert.equal(pipelineStatusLine(g, "", now), "Generated 2026-11-27 12:34 UTC");
+  assert.match(pipelineStatusLine(g, "checking", now), /^Checking\.\.\. Generated/);
+  assert.match(pipelineStatusLine(g, "failed", now), /^Recheck failed, showing earlier results\. Generated/);
+  assert.match(pipelineStatusLine(g, "owner", now), /^Status is calculated on the owner's machine\. Generated 2026-11-27 12:34 UTC$/);
+  assert.match(pipelineStatusLine(g, "", now + 72 * 36e5), /older than 48 hours/);
+});

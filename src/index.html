@@ -253,7 +253,7 @@
         <div id="map-caption" class="map-caption">drag a node to move it &middot; scroll to zoom &middot; drag empty space to pan &middot; click a node to <b>highlight its links</b> &middot; double-click to <b>open it</b></div>
       </section>
 
-      <!-- Pipeline: what intel is stale and what to refresh next, plus the VoC backlog. Reads files only; Run buttons open Claude. -->
+      <!-- Pipeline: what intel is stale and what to refresh next, plus the VoC backlog. Reads files; on the owner's machine a manual Refresh also reruns the staleness script. Run buttons open Claude. -->
       <section id="pipeline-view" class="skills-view hidden">
         <div class="od-page">
           <div class="od-head"><span id="pipeline-generated" class="muted"></span></div>
@@ -285,7 +285,7 @@
         </div>
       </section>
 
-      <!-- OneDrive health: what is wrong, what to do, Refresh to re-check. -->
+      <!-- OneDrive Heartbeat: what is wrong and what to do. The header Refresh re-runs the check. -->
       <section id="onedrive-view" class="skills-view hidden">
         <div class="od-page">
           <div class="od-head">

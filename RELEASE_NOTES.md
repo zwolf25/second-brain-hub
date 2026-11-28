@@ -1,1 +1,1 @@
-The Competitive tab now lists primary competitors in their own section with verticals and geos, and added competitors awaiting research show a red dot. PMD rows count only new stories and NPS responses.
+On Market Intel, Refresh now rechecks what is stale on the owner's machine; other users see when the status was generated. Errors now appear as red notifications at the bottom of the window instead of system pop-up boxes. Update buttons on the Market Intel pages now open Claude with the specific competitor or PMD named.
