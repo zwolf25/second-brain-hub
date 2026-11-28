@@ -15,13 +15,12 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | 4 | TD-6 | Debt | **Verify on Windows**: updater cycle, file watcher with OneDrive, `claude://` deep link, in-app editing (§12 items 0, 1, 2, 5), plus the 0.18.0 OneDrive probes (`tasklist`, `reg query`, no console flash) on a real Windows machine. Needs a Windows tester; builds already ship for it. | 4 | 4 | 8 | Listed as untested across §12; shipping unverified to Windows users. Two teammates were asked on 2026-11-01. |
 | 5 | F-17 | Feature (new) | **OneDrive download check:** detect remote-to-local stalls (teammates' changes not arriving) and a real upload test on Windows. Needs a scheduled writer on another machine, or a Windows sync-state source. | 3 | 4 | 6 | 0.18.0 monitors uploads on macOS only; a Windows machine reports process, sign-in and folder only. |
 | 8 | F-19 | Feature (new) | **Tray icon swap** (warning badge) while a OneDrive problem is open. Needs a second icon asset. | 2 | 2 | 8 | Planned as a nice-to-have in 0.18.0, not built; tooltip only. |
-| 6 | F-13 | Feature (new) | **Vault health page (owner-facing); first half shipped in 0.19.0 as the Pipeline page (intel staleness, queues, VoC). Left: `_status/pipelines.json` freshness section.** read `_status/pipelines.json` and the queue folders to show pipeline freshness and queue backlogs. Zero tokens. | 2 | 2 | 8 | Same data `sb_inventory.py` prints; the dashboard doctor covers Zac's machine, not the shared view. |
-| 7 | TD-17 | Debt | **Dark-mode colour tokens.** `src/styles.css` has about 292 raw hex colours, many outside `var(--…)` and outside the dark-mode `@media` overrides, so dark mode drifts per rule. Move them onto tokens defined in `:root` and both dark blocks. | 3 | 3 | 6 | Found in the 0.21.5 consistency review; dark mode was audited once in 0.20.3 and drifts again. Not a release blocker. |
 | 6 | TD-7 | Debt | **Split the big files.** `main.js` is 2,228 lines (one scope, all pages), `transcripts.rs` 1,776, and `lib.rs` 1,216 with ~60 commands in one file. Split by page/feature once a change forces it; do not refactor speculatively. | 2 | 4 | 4 | Maintainability only; no user pain today. Counts re-measured 2026-11-20 (were 1,917 / 1,773 / 1,099); the OneDrive page added ~300 lines to `main.js`. New code goes in `onedrive.rs`-style modules; a `onedrive.js` page module is the natural first split. |
 
 (F-16 in Done below is the 0.17.0 usage counters; the open download check was renumbered F-17 on 2026-11-20 to remove the clash.)
 
 ## Not doing (decided)
+- F-13 data-freshness section (2026-11-27): pipeline freshness is not specific to Market Intel.
 - Incremental indexing (TD-9): a full rebuild of the real vault takes 594 ms (2026-11-01). Revisit if the `indexed N docs ... in M ms` log line shows seconds.
 - Apple notarization / paid developer account — internal tool, cost not justified (ARCHITECTURE §9).
 
@@ -72,3 +71,5 @@ Rows marked **new** were proposed 2026-11-02 from a read of `ARCHITECTURE.md`, `
 | 0.21.0 | F-18 | OS notification once per OneDrive red episode. | | | | macOS prompt unverified. |
 | 0.21.0 | TD-15 | Shortcut map in `lib.js` (`NAV_KEYS`), tested against `<kbd>` hints. | | | | |
 | 0.21.0 | F-13 (part) | Market Intel hides empty queues, menu count, open/Show folder on tabs, PMD search with PM/PMM. | | | | Update plan panel, Tell-the-owner rows and shared queues (WS12) dropped 2026-11-23. |
+| F-13 (close) | Remaining part (`_status/pipelines.json` freshness) dropped: not specific to Market Intel. Page and queues shipped earlier. | 0.21.6 |
+| TD-17 | Dark-mode colour tokens in `src/styles.css` | 0.21.6 |

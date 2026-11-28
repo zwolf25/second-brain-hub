@@ -1,1 +1,1 @@
-On Market Intel, Refresh now rechecks what is stale on the owner's machine; other users see when the status was generated. Errors now appear as red notifications at the bottom of the window instead of system pop-up boxes. Update buttons on the Market Intel pages now open Claude with the specific competitor or PMD named.
+Dark mode is more consistent across the app. Market Intel now shows Update on any item with new records, uses shorter PMD names, and its queue Process buttons give Claude clear instructions.

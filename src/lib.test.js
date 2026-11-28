@@ -241,3 +241,26 @@ test("pipelineStatusLine: shows the generated time, the Refresh outcome and the 
   assert.match(pipelineStatusLine(g, "owner", now), /^Status is calculated on the owner's machine\. Generated 2026-11-27 12:34 UTC$/);
   assert.match(pipelineStatusLine(g, "", now + 72 * 36e5), /older than 48 hours/);
 });
+
+import { outputLabel, showUpdate, queuePrompt } from "./lib.js";
+
+test("Market Intel rows: no PMD prefix, Update unless a current item has 0 records", () => {
+  assert.equal(outputLabel("PMD: easypay"), "easypay");
+  assert.equal(outputLabel("Win/Loss/Churn report"), "Win/Loss/Churn report");
+  assert.ok(showUpdate({ stale: false, new_upstream: 1 }));
+  assert.ok(showUpdate({ stale: true, new_upstream: 0 }));
+  assert.ok(!showUpdate({ stale: false, new_upstream: 0 }));
+});
+
+test("queuePrompt: every detector queue gets an instruction, an unknown one still runs its skill", () => {
+  for (const name of ["Gong", "SFDC", "Churn", "Competitor watch", "Competitor queue"]) {
+    assert.match(queuePrompt({ name, skill: "s" }), /^\/s \S.*queue/i, name);
+  }
+  assert.equal(queuePrompt({ name: "New", skill: "s" }), "/s");
+});
+
+import { showName } from "./lib.js";
+test("showName fixes EcoTrak capitals and leaves other names alone", () => {
+  assert.equal(showName("Ecotrak"), "EcoTrak");
+  assert.equal(showName("Corrigo"), "Corrigo");
+});

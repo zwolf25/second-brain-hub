@@ -2,6 +2,13 @@
 
 Per-release detail (why and how). `ARCHITECTURE.md` describes the current state; add one entry here per release (hub-release step 3). User-facing text lives in `RELEASE_NOTES.md`, which CI overwrites each release.
 
+## 0.21.6
+- **Colour tokens (BACKLOG TD-17).** Each rule had its own dark override, so dark mode drifted. `src/styles.css` now defines colour tokens once in a light `:root` and one dark `:root`; colours that are the same in both modes stay literal. Fixed in dark mode: white borders on backlinks, salmon text on error toasts, an unstyled green "promote" pill, grey text that never switched, a hidden primary-card top stripe. Some near-identical greys are merged in both modes. Checked by comparing computed styles for 296 selectors before and after in headless Chromium. The Neural Map canvas colours in `main.js` are unchanged.
+- **Queue Process buttons say what to do.** They sent only the bare skill name. `queuePrompt` in `lib.js` adds instructions per queue.
+- **Market Intel:** removed the "Then PMDs, then Competitive, in that order." line; PMD rows drop the "PMD: " prefix (`outputLabel`); Update shows when an item has new records or is stale (`showUpdate`), so a stale item with no update date keeps it at 0 records; the competitor tab shows "EcoTrak" (`showName`, display only; vault folder and commands unchanged).
+- Dropped: the F-13 data-freshness section (not specific to Market Intel).
+- Looked over in a local test build and accepted; which screens and items were covered was not recorded. Not verified: Windows.
+
 ## 0.21.5
 - **Release race fixed (BACKLOG TD-16).** 0.21.4 lost its Apple Silicon `latest.json` entry because three platform jobs wrote the same file. Now tauri-action skips the manifest (`uploadUpdaterJson: 'false'`) and a final `manifest` job in `build.yml` writes it once from the `.sig` assets, through `scripts/make-updater-manifest.mjs`. The script fails the run if any of the seven platform keys is missing. Tests: `scripts/make-updater-manifest.test.mjs` (4). The first real run of the new job is the release itself; check that the release lists all seven platforms.
 - **Refresh rechecks Market Intel.** A refreshed item stayed stale because Refresh only reread `_status/intel-staleness.json`, which a background job writes. On the owner's machine, a manual Refresh with Market Intel open now reruns `intel-staleness.py` first (about 10 s measured), showing "Checking..."; a failure or 120 s timeout keeps the old file and says so. Other machines are told status is calculated on the owner's machine. The status line now reads "Generated", not "Updated". Code: `pipeline::recheck`, `recheckPipeline`. Tests: 3 Rust fixture tests (macOS), 1 ignored acceptance test run by hand against the real script, 1 JS test.

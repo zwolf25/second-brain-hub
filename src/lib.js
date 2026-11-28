@@ -192,6 +192,22 @@ export function pipelineStatusLine(generated, note, now = Date.now()) {
   return `${lead}Generated ${at}${old}`;
 }
 
+// Row title: the PMDs tab already says these are PMDs.
+export const outputLabel = (name) => String(name).replace(/^PMD:\s*/, "");
+
+// Update shows for any item with new records; stale ones keep it even at 0 (no update date).
+export const showUpdate = (o) => Boolean(o.stale || o.new_upstream > 0);
+
+// A bare skill name does not tell Claude to work a queue, so each Process button says which one.
+const QUEUE_ASKS = {
+  Gong: "Process the Gong queue (~/Projects/crawl4ai/gong_queue.json).",
+  SFDC: "Process the CRM opportunity queue, queue C (~/Projects/crawl4ai/sfdc_winloss_queue.json).",
+  Churn: "Process the churn queue (~/Projects/crawl4ai/churn_queue.json).",
+  "Competitor watch": "Work through the competitor watch queue (~/Projects/crawl4ai/competitor_watch_queue.json). Each entry names a competitor and a captured page in raw_path. Group the entries by competitor, show me the list, and ask which to research first.",
+  "Competitor queue": "Work through the open items in competitors/_queue/ following queue-triage.md. Open items have no .done.md marker. Group them by competitor, include unknown/ items and open _proposals/, show me the list, and ask which to run first.",
+};
+export const queuePrompt = (q) => [`/${q.skill}`, QUEUE_ASKS[q.name]].filter(Boolean).join(" ");
+
 export function pipelineBadgeCount(status) {
   if (!status) return 0;
   return (status.queues ?? []).reduce((n, q) => n + (q.pending || 0), 0) + (status.outputs ?? []).filter((o) => o.stale).length
@@ -201,6 +217,9 @@ export function pipelineBadgeCount(status) {
 // ---- Market Intel Competitive tab (0.21.3). Sections: Landscape map, Primary, Other (added mixed in), Watching.
 // The vault's intel-staleness.json supplies competitors_added / competitors_watch; both default to empty.
 export const compName = (outputName) => String(outputName).replace(/^Battlecard:\s*/, "");
+
+// Display only: vault folders and prompts keep their own spelling.
+export const showName = (name) => String(name).replace(/\becotrak\b/gi, "EcoTrak");
 
 // Profiles are keyed by display name; `folder` names the competitor folder when its spelling differs (Fexa -> fexa).
 export function profileFor(profiles = {}, outputName) {
